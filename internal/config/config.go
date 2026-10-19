@@ -11,7 +11,13 @@ import (
 	"time"
 )
 
-const minJWTSecretLength = 32
+const (
+	minJWTSecretLength = 32
+	minDBConns         = 2
+
+	LoginLimiterRedis  = "redis"
+	LoginLimiterMemory = "memory"
+)
 
 type Config struct {
 	HTTPAddr          string
@@ -20,12 +26,15 @@ type Config struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+	ShutdownDrain     time.Duration
 	MaxBodyBytes      int64
 	TrustedProxies    []string
 
-	DatabaseURL    string
-	DBMaxConns     int32
-	MigrateOnStart bool
+	DatabaseURL        string
+	DBMaxConns         int32
+	DBStatementTimeout time.Duration
+	DBLockTimeout      time.Duration
+	MigrateOnStart     bool
 
 	RedisURL string
 
@@ -35,8 +44,12 @@ type Config struct {
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 
+	LoginLimiter       string
 	LoginMaxFailures   int
 	LoginFailureWindow time.Duration
+
+	HashMaxConcurrent  int
+	HashAcquireTimeout time.Duration
 
 	WSAllowedOrigins []string
 
@@ -56,10 +69,13 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		WriteTimeout:       p.duration("HTTP_WRITE_TIMEOUT", 15*time.Second),
 		IdleTimeout:        p.duration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 		ShutdownTimeout:    p.duration("SHUTDOWN_TIMEOUT", 20*time.Second),
+		ShutdownDrain:      p.duration("SHUTDOWN_DRAIN_DELAY", 3*time.Second),
 		MaxBodyBytes:       int64(p.integer("HTTP_MAX_BODY_BYTES", 1<<20)),
 		TrustedProxies:     p.list("TRUSTED_PROXIES"),
 		DatabaseURL:        p.str("DATABASE_URL", ""),
 		DBMaxConns:         p.int32("DB_MAX_CONNS", 20),
+		DBStatementTimeout: p.duration("DB_STATEMENT_TIMEOUT", 30*time.Second),
+		DBLockTimeout:      p.duration("DB_LOCK_TIMEOUT", 5*time.Second),
 		MigrateOnStart:     p.boolean("MIGRATE_ON_START", true),
 		RedisURL:           p.str("REDIS_URL", ""),
 		JWTSecret:          []byte(p.str("JWT_SECRET", "")),
@@ -67,8 +83,11 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		JWTAudience:        p.str("JWT_AUDIENCE", "cardo-api"),
 		AccessTokenTTL:     p.duration("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:    p.duration("REFRESH_TOKEN_TTL", 7*24*time.Hour),
+		LoginLimiter:       strings.ToLower(p.str("LOGIN_LIMITER", LoginLimiterRedis)),
 		LoginMaxFailures:   p.integer("LOGIN_MAX_FAILURES", 5),
 		LoginFailureWindow: p.duration("LOGIN_FAILURE_WINDOW", time.Minute),
+		HashMaxConcurrent:  p.integer("ARGON2_MAX_CONCURRENT", 0),
+		HashAcquireTimeout: p.duration("ARGON2_ACQUIRE_TIMEOUT", 2*time.Second),
 		WSAllowedOrigins:   p.list("WS_ALLOWED_ORIGINS"),
 		LogLevel:           p.level("LOG_LEVEL", slog.LevelInfo),
 	}
@@ -107,9 +126,25 @@ func (c Config) validate() error {
 	if c.LoginFailureWindow <= 0 {
 		errs = append(errs, errors.New("LOGIN_FAILURE_WINDOW must be positive"))
 	}
-	if c.DBMaxConns <= 0 {
-		errs = append(errs, errors.New("DB_MAX_CONNS must be positive"))
+	if c.DBMaxConns < minDBConns {
+		errs = append(errs, fmt.Errorf("DB_MAX_CONNS must be at least %d", minDBConns))
 	}
+	if c.DBStatementTimeout < 0 {
+		errs = append(errs, errors.New("DB_STATEMENT_TIMEOUT must not be negative"))
+	}
+	if c.DBLockTimeout < 0 {
+		errs = append(errs, errors.New("DB_LOCK_TIMEOUT must not be negative"))
+	}
+	if c.ShutdownDrain < 0 {
+		errs = append(errs, errors.New("SHUTDOWN_DRAIN_DELAY must not be negative"))
+	}
+	if c.HashMaxConcurrent < 0 {
+		errs = append(errs, errors.New("ARGON2_MAX_CONCURRENT must not be negative"))
+	}
+	if c.HashAcquireTimeout <= 0 {
+		errs = append(errs, errors.New("ARGON2_ACQUIRE_TIMEOUT must be positive"))
+	}
+	errs = append(errs, c.validateLimiter()...)
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
 	}
@@ -213,4 +248,17 @@ func (p *parser) level(key string, def slog.Level) slog.Level {
 		return def
 	}
 	return l
+}
+
+func (c Config) validateLimiter() []error {
+	switch c.LoginLimiter {
+	case LoginLimiterRedis:
+		if c.RedisURL == "" {
+			return []error{errors.New("REDIS_URL is required unless LOGIN_LIMITER=memory")}
+		}
+	case LoginLimiterMemory:
+	default:
+		return []error{fmt.Errorf("LOGIN_LIMITER must be %q or %q", LoginLimiterRedis, LoginLimiterMemory)}
+	}
+	return nil
 }

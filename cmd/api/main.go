@@ -67,8 +67,11 @@ func run() error {
 		TTL:      cfg.AccessTokenTTL,
 	}, nil)
 	authService := auth.NewService(auth.Deps{
-		Store:      store,
-		Hasher:     auth.NewArgon2Hasher(auth.DefaultArgon2Params),
+		Store: store,
+		Hasher: auth.NewArgon2Hasher(auth.DefaultArgon2Params,
+			auth.WithMaxConcurrent(cfg.HashMaxConcurrent),
+			auth.WithAcquireTimeout(cfg.HashAcquireTimeout),
+		),
 		Access:     jwtManager,
 		Limiter:    newLoginLimiter(cfg, rdb, logger),
 		RefreshTTL: cfg.RefreshTokenTTL,
@@ -128,8 +131,8 @@ func closeRedis(rdb *redis.Client, logger *slog.Logger) {
 }
 
 func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) auth.LoginLimiter {
-	if rdb == nil {
-		logger.Warn("REDIS_URL is not set, using in-memory login rate limiter")
+	if cfg.LoginLimiter == config.LoginLimiterMemory || rdb == nil {
+		logger.Warn("using per-instance in-memory login rate limiter, not suitable for multiple instances")
 		return auth.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
 	}
 	return auth.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)

@@ -22,6 +22,7 @@ func baseEnv(extra map[string]string) map[string]string {
 	m := map[string]string{
 		"DATABASE_URL": "postgres://u:p@localhost:5432/db",
 		"JWT_SECRET":   validSecret,
+		"REDIS_URL":    "redis://localhost:6379/0",
 	}
 	for k, v := range extra {
 		m[k] = v
@@ -44,7 +45,13 @@ func TestLoadFromDefaults(t *testing.T) {
 	assert.Empty(t, cfg.TrustedProxies)
 	assert.Equal(t, int32(20), cfg.DBMaxConns)
 	assert.True(t, cfg.MigrateOnStart)
-	assert.Empty(t, cfg.RedisURL)
+	assert.Equal(t, "redis://localhost:6379/0", cfg.RedisURL)
+	assert.Equal(t, config.LoginLimiterRedis, cfg.LoginLimiter)
+	assert.Equal(t, 3*time.Second, cfg.ShutdownDrain)
+	assert.Equal(t, 30*time.Second, cfg.DBStatementTimeout)
+	assert.Equal(t, 5*time.Second, cfg.DBLockTimeout)
+	assert.Equal(t, 0, cfg.HashMaxConcurrent)
+	assert.Equal(t, 2*time.Second, cfg.HashAcquireTimeout)
 	assert.Equal(t, []byte(validSecret), cfg.JWTSecret)
 	assert.Equal(t, "cardo", cfg.JWTIssuer)
 	assert.Equal(t, "cardo-api", cfg.JWTAudience)
@@ -78,6 +85,11 @@ func TestLoadFromOverrides(t *testing.T) {
 		"LOGIN_FAILURE_WINDOW":     "30s",
 		"WS_ALLOWED_ORIGINS":       "https://a.example, https://b.example",
 		"LOG_LEVEL":                "debug",
+		"SHUTDOWN_DRAIN_DELAY":     "0s",
+		"DB_STATEMENT_TIMEOUT":     "10s",
+		"DB_LOCK_TIMEOUT":          "1s",
+		"ARGON2_MAX_CONCURRENT":    "4",
+		"ARGON2_ACQUIRE_TIMEOUT":   "500ms",
 	})))
 	require.NoError(t, err)
 
@@ -100,6 +112,11 @@ func TestLoadFromOverrides(t *testing.T) {
 	assert.Equal(t, 30*time.Second, cfg.LoginFailureWindow)
 	assert.Equal(t, []string{"https://a.example", "https://b.example"}, cfg.WSAllowedOrigins)
 	assert.Equal(t, slog.LevelDebug, cfg.LogLevel)
+	assert.Equal(t, time.Duration(0), cfg.ShutdownDrain)
+	assert.Equal(t, 10*time.Second, cfg.DBStatementTimeout)
+	assert.Equal(t, time.Second, cfg.DBLockTimeout)
+	assert.Equal(t, 4, cfg.HashMaxConcurrent)
+	assert.Equal(t, 500*time.Millisecond, cfg.HashAcquireTimeout)
 }
 
 func TestLoadFromErrors(t *testing.T) {
@@ -172,7 +189,7 @@ func TestLoadFromErrors(t *testing.T) {
 		{
 			name:    "non positive db conns",
 			env:     baseEnv(map[string]string{"DB_MAX_CONNS": "0"}),
-			wantErr: []string{"DB_MAX_CONNS must be positive"},
+			wantErr: []string{"DB_MAX_CONNS must be at least 2"},
 		},
 		{
 			name:    "non positive body limit",
@@ -183,6 +200,31 @@ func TestLoadFromErrors(t *testing.T) {
 			name:    "non positive shutdown timeout",
 			env:     baseEnv(map[string]string{"SHUTDOWN_TIMEOUT": "0s"}),
 			wantErr: []string{"SHUTDOWN_TIMEOUT must be positive"},
+		},
+		{
+			name:    "single db conn",
+			env:     baseEnv(map[string]string{"DB_MAX_CONNS": "1"}),
+			wantErr: []string{"DB_MAX_CONNS must be at least 2"},
+		},
+		{
+			name:    "redis required by default",
+			env:     baseEnv(map[string]string{"REDIS_URL": ""}),
+			wantErr: []string{"REDIS_URL is required unless LOGIN_LIMITER=memory"},
+		},
+		{
+			name:    "unknown login limiter",
+			env:     baseEnv(map[string]string{"LOGIN_LIMITER": "file"}),
+			wantErr: []string{"LOGIN_LIMITER must be"},
+		},
+		{
+			name:    "negative timeouts",
+			env:     baseEnv(map[string]string{"DB_STATEMENT_TIMEOUT": "-1s", "DB_LOCK_TIMEOUT": "-1s", "SHUTDOWN_DRAIN_DELAY": "-1s"}),
+			wantErr: []string{"DB_STATEMENT_TIMEOUT", "DB_LOCK_TIMEOUT", "SHUTDOWN_DRAIN_DELAY"},
+		},
+		{
+			name:    "invalid argon2 limits",
+			env:     baseEnv(map[string]string{"ARGON2_MAX_CONCURRENT": "-1", "ARGON2_ACQUIRE_TIMEOUT": "0s"}),
+			wantErr: []string{"ARGON2_MAX_CONCURRENT", "ARGON2_ACQUIRE_TIMEOUT"},
 		},
 		{
 			name: "multiple parse errors are joined",
@@ -209,8 +251,22 @@ func TestLoadFromErrors(t *testing.T) {
 func TestLoadUsesProcessEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://x")
 	t.Setenv("JWT_SECRET", validSecret)
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("HTTP_ADDR", ":9999")
 	cfg, err := config.Load()
 	require.NoError(t, err)
 	assert.Equal(t, ":9999", cfg.HTTPAddr)
+}
+
+func TestLoadFromMemoryLimiterOptIn(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"REDIS_URL": "", "LOGIN_LIMITER": "Memory"})))
+	require.NoError(t, err)
+	assert.Equal(t, config.LoginLimiterMemory, cfg.LoginLimiter)
+	assert.Empty(t, cfg.RedisURL)
+
+	cfg, err = config.LoadFrom(env(baseEnv(map[string]string{"LOGIN_LIMITER": "memory"})))
+	require.NoError(t, err)
+	assert.Equal(t, config.LoginLimiterMemory, cfg.LoginLimiter)
+	assert.NotEmpty(t, cfg.RedisURL)
 }
