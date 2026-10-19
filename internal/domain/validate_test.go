@@ -106,6 +106,9 @@ func TestNormalizeDisplayName(t *testing.T) {
 		{name: "max runes", in: strings.Repeat("я", 100), want: strings.Repeat("я", 100)},
 		{name: "over max runes", in: strings.Repeat("я", 101), invalid: true},
 		{name: "trim before counting", in: " " + strings.Repeat("a", 100) + " ", want: strings.Repeat("a", 100)},
+		{name: "nul byte", in: "Ali\x00ce", invalid: true},
+		{name: "inner newline", in: "Ali\nce", invalid: true},
+		{name: "invalid utf8", in: "Ali\xffce", invalid: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +171,9 @@ func TestNormalizeBoardTitle(t *testing.T) {
 		{name: "blank", in: "   ", invalid: true},
 		{name: "max", in: strings.Repeat("ж", 200), want: strings.Repeat("ж", 200)},
 		{name: "over max", in: strings.Repeat("ж", 201), invalid: true},
+		{name: "nul byte", in: "Spr\x00int", invalid: true},
+		{name: "escape char", in: "Spr\x1bint", invalid: true},
+		{name: "invalid utf8", in: "Spr\xffint", invalid: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

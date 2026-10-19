@@ -4,6 +4,7 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -45,6 +46,9 @@ func ValidatePassword(password string) error {
 
 func NormalizeDisplayName(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
+	if err := checkText("display_name", name); err != nil {
+		return "", err
+	}
 	n := utf8.RuneCountInString(name)
 	if n == 0 {
 		return "", NewValidationError("display_name", "is required")
@@ -65,6 +69,9 @@ func NormalizeAvatarColor(raw string) (string, error) {
 
 func NormalizeBoardTitle(raw string) (string, error) {
 	title := strings.TrimSpace(raw)
+	if err := checkText("title", title); err != nil {
+		return "", err
+	}
 	n := utf8.RuneCountInString(title)
 	if n == 0 {
 		return "", NewValidationError("title", "is required")
@@ -90,4 +97,16 @@ func DefaultAvatarColor(seed string) string {
 		h *= 16777619
 	}
 	return avatarPalette[h%avatarPaletteSize]
+}
+
+func checkText(field, s string) error {
+	if !utf8.ValidString(s) {
+		return NewValidationError(field, "must be valid UTF-8")
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return NewValidationError(field, "must not contain control characters")
+		}
+	}
+	return nil
 }
