@@ -4,6 +4,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -25,10 +27,16 @@ const (
 	CodePayloadTooLarge  = "payload_too_large"
 	CodeRateLimited      = "rate_limited"
 	CodeNotReady         = "not_ready"
+	CodeOverloaded       = "overloaded"
+	CodeBusy             = "busy"
+	CodeShuttingDown     = "shutting_down"
 	CodeInternal         = "internal"
 )
 
-const rateLimitRetryAfter = "60"
+const (
+	defaultRateLimitRetryAfter = "60"
+	unavailableRetryAfter      = "1"
+)
 
 type ErrorBody struct {
 	Code    string `json:"code"`
@@ -55,13 +63,19 @@ var sentinelErrors = []struct {
 	{domain.ErrForbidden, apiError{status: http.StatusForbidden, code: CodeForbidden, message: "insufficient permissions"}},
 	{domain.ErrEmailTaken, apiError{status: http.StatusConflict, code: CodeEmailTaken, message: "email is already registered"}},
 	{domain.ErrInvalidCredential, apiError{status: http.StatusUnauthorized, code: CodeLoginFailed, message: "invalid email or password"}},
-	{domain.ErrRateLimited, apiError{status: http.StatusTooManyRequests, code: CodeRateLimited, message: "too many attempts, try again later", retryAfter: rateLimitRetryAfter}},
+	{domain.ErrRateLimited, apiError{status: http.StatusTooManyRequests, code: CodeRateLimited, message: "too many attempts, try again later", retryAfter: defaultRateLimitRetryAfter}},
+	{domain.ErrOverloaded, apiError{status: http.StatusServiceUnavailable, code: CodeOverloaded, message: "server is overloaded, try again later", retryAfter: unavailableRetryAfter}},
+	{domain.ErrBusy, apiError{status: http.StatusServiceUnavailable, code: CodeBusy, message: "resource is busy, try again later", retryAfter: unavailableRetryAfter}},
 	{domain.ErrTokenExpired, apiError{status: http.StatusUnauthorized, code: CodeTokenExpired, message: "token has expired"}},
 	{domain.ErrTokenReused, apiError{status: http.StatusUnauthorized, code: CodeTokenReused, message: "refresh token was already used, session revoked"}},
 	{domain.ErrTokenInvalid, apiError{status: http.StatusUnauthorized, code: CodeInvalidToken, message: "token is invalid"}},
 }
 
 func mapError(err error) (apiError, bool) {
+	var rlErr *domain.RateLimitError
+	if errors.As(err, &rlErr) {
+		return apiError{status: http.StatusTooManyRequests, code: CodeRateLimited, message: "too many attempts, try again later", retryAfter: retryAfterSeconds(rlErr.RetryAfter)}, true
+	}
 	var vErr *domain.ValidationError
 	if errors.As(err, &vErr) {
 		return apiError{status: http.StatusBadRequest, code: CodeValidation, message: vErr.Error()}, true
@@ -108,4 +122,12 @@ func (h *handlers) failCurrentUser(c *gin.Context, err error) {
 		return
 	}
 	h.fail(c, err)
+}
+
+func retryAfterSeconds(d time.Duration) string {
+	if d <= 0 {
+		return defaultRateLimitRetryAfter
+	}
+	secs := int64((d + time.Second - 1) / time.Second)
+	return strconv.FormatInt(secs, 10)
 }

@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 func TestArgon2HashFormat(t *testing.T) {
 	t.Parallel()
 	h := auth.NewArgon2Hasher(fastArgon2)
-	encoded, err := h.Hash("correct horse")
+	encoded, err := h.Hash(context.Background(), "correct horse")
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(encoded, "$argon2id$v=19$m=8,t=1,p=1$"), encoded)
 	assert.Len(t, strings.Split(encoded, "$"), 6)
@@ -23,7 +24,7 @@ func TestArgon2HashFormat(t *testing.T) {
 func TestArgon2HashVerify(t *testing.T) {
 	t.Parallel()
 	h := auth.NewArgon2Hasher(fastArgon2)
-	encoded, err := h.Hash("correct horse")
+	encoded, err := h.Hash(context.Background(), "correct horse")
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -41,7 +42,7 @@ func TestArgon2HashVerify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ok, err := h.Verify(tt.password, encoded)
+			ok, err := h.Verify(context.Background(), tt.password, encoded)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, ok)
 		})
@@ -51,20 +52,20 @@ func TestArgon2HashVerify(t *testing.T) {
 func TestArgon2HashIsSalted(t *testing.T) {
 	t.Parallel()
 	h := auth.NewArgon2Hasher(fastArgon2)
-	a, err := h.Hash("same-password")
+	a, err := h.Hash(context.Background(), "same-password")
 	require.NoError(t, err)
-	b, err := h.Hash("same-password")
+	b, err := h.Hash(context.Background(), "same-password")
 	require.NoError(t, err)
 	assert.NotEqual(t, a, b)
 }
 
 func TestArgon2VerifyUsesParamsFromEncodedHash(t *testing.T) {
 	t.Parallel()
-	encoded, err := auth.NewArgon2Hasher(fastArgon2).Hash("pw-pw-pw-pw")
+	encoded, err := auth.NewArgon2Hasher(fastArgon2).Hash(context.Background(), "pw-pw-pw-pw")
 	require.NoError(t, err)
 
 	other := auth.NewArgon2Hasher(auth.Argon2Params{Memory: 16, Iterations: 3, Parallelism: 2, SaltLength: 16, KeyLength: 32})
-	ok, err := other.Verify("pw-pw-pw-pw", encoded)
+	ok, err := other.Verify(context.Background(), "pw-pw-pw-pw", encoded)
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
@@ -72,7 +73,7 @@ func TestArgon2VerifyUsesParamsFromEncodedHash(t *testing.T) {
 func TestArgon2VerifyRejectsMalformedHashes(t *testing.T) {
 	t.Parallel()
 	h := auth.NewArgon2Hasher(fastArgon2)
-	valid, err := h.Hash("password")
+	valid, err := h.Hash(context.Background(), "password")
 	require.NoError(t, err)
 	parts := strings.Split(valid, "$")
 
@@ -107,7 +108,7 @@ func TestArgon2VerifyRejectsMalformedHashes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ok, err := h.Verify("password", tt.encoded)
+			ok, err := h.Verify(context.Background(), "password", tt.encoded)
 			assert.ErrorIs(t, err, auth.ErrInvalidHash)
 			assert.False(t, ok)
 		})

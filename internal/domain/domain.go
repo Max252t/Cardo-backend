@@ -17,7 +17,21 @@ var (
 	ErrTokenInvalid      = errors.New("token invalid")
 	ErrTokenExpired      = errors.New("token expired")
 	ErrTokenReused       = errors.New("refresh token reused")
+	ErrOverloaded        = errors.New("server overloaded")
+	ErrBusy              = errors.New("resource busy")
 )
+
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	return ErrRateLimited.Error()
+}
+
+func (e *RateLimitError) Unwrap() error {
+	return ErrRateLimited
+}
 
 type ValidationError struct {
 	Field   string

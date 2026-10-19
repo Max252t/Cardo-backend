@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,65 +20,79 @@ func redisKey() string {
 	return "it-" + uuid.NewString()
 }
 
-func TestRedisLimiterBlocksAfterMaxFailures(t *testing.T) {
+func TestRedisLimiterAllowsMaxAttemptsThenBlocks(t *testing.T) {
 	client := testutil.NewRedis(t)
 	l := auth.NewRedisLimiter(client, 5, time.Minute)
 	key := redisKey()
 
-	assert.True(t, allow(t, l, key))
-	for i := 1; i <= 4; i++ {
-		fail(t, l, key, 1)
-		assert.True(t, allow(t, l, key), "after %d failures", i)
+	for i := 1; i <= 5; i++ {
+		r := reserve(t, l, key)
+		assert.True(t, r.Allowed, "attempt %d", i)
+		assert.Equal(t, i, r.Attempts)
 	}
-	fail(t, l, key, 1)
-	assert.False(t, allow(t, l, key))
-	fail(t, l, key, 1)
-	assert.False(t, allow(t, l, key))
+	r := reserve(t, l, key)
+	assert.False(t, r.Allowed)
+	assert.Greater(t, r.RetryAfter, time.Duration(0))
+	assert.LessOrEqual(t, r.RetryAfter, time.Minute)
 }
 
 func TestRedisLimiterKeysAreIndependent(t *testing.T) {
 	client := testutil.NewRedis(t)
 	l := auth.NewRedisLimiter(client, 2, time.Minute)
 	a, b := redisKey(), redisKey()
-	fail(t, l, a, 2)
-	assert.False(t, allow(t, l, a))
-	assert.True(t, allow(t, l, b))
+	reserveN(t, l, a, 2)
+	assert.False(t, reserve(t, l, a).Allowed)
+	assert.True(t, reserve(t, l, b).Allowed)
 }
 
 func TestRedisLimiterReset(t *testing.T) {
 	client := testutil.NewRedis(t)
 	l := auth.NewRedisLimiter(client, 2, time.Minute)
 	key := redisKey()
-	fail(t, l, key, 2)
-	require.False(t, allow(t, l, key))
+	reserveN(t, l, key, 3)
 
 	require.NoError(t, l.Reset(context.Background(), key))
-	assert.True(t, allow(t, l, key))
+	assert.Equal(t, 1, reserve(t, l, key).Attempts)
+	require.NoError(t, l.Reset(context.Background(), key))
 	require.NoError(t, l.Reset(context.Background(), key), "reset of a missing key is a no-op")
 }
 
-func TestRedisLimiterTTLIsSetOnceFromFirstFailure(t *testing.T) {
+func TestRedisLimiterTTLIsSetOnceFromFirstAttempt(t *testing.T) {
 	client := testutil.NewRedis(t)
 	window := 90 * time.Second
 	l := auth.NewRedisLimiter(client, 10, window)
 	key := redisKey()
 	ctx := context.Background()
 
-	fail(t, l, key, 1)
-	first, err := client.TTL(ctx, "ratelimit:login:"+key).Result()
+	reserve(t, l, key)
+	first, err := client.PTTL(ctx, auth.RedisLoginKeyPrefix+key).Result()
 	require.NoError(t, err)
 	assert.Greater(t, first, time.Duration(0))
 	assert.LessOrEqual(t, first, window)
 
-	fail(t, l, key, 3)
-	second, err := client.TTL(ctx, "ratelimit:login:"+key).Result()
+	reserveN(t, l, key, 3)
+	second, err := client.PTTL(ctx, auth.RedisLoginKeyPrefix+key).Result()
 	require.NoError(t, err)
 	assert.Greater(t, second, time.Duration(0))
-	assert.LessOrEqual(t, second, first, "later failures must not extend the window")
+	assert.LessOrEqual(t, second, first, "later attempts must not extend the window")
 
-	n, err := client.Get(ctx, "ratelimit:login:"+key).Int()
+	n, err := client.Get(ctx, auth.RedisLoginKeyPrefix+key).Int()
 	require.NoError(t, err)
 	assert.Equal(t, 4, n)
+}
+
+func TestRedisLimiterRestoresMissingTTL(t *testing.T) {
+	client := testutil.NewRedis(t)
+	l := auth.NewRedisLimiter(client, 10, time.Minute)
+	key := redisKey()
+	ctx := context.Background()
+	require.NoError(t, client.Set(ctx, auth.RedisLoginKeyPrefix+key, 3, 0).Err())
+
+	r := reserve(t, l, key)
+	assert.Equal(t, 4, r.Attempts)
+	ttl, err := client.PTTL(ctx, auth.RedisLoginKeyPrefix+key).Result()
+	require.NoError(t, err)
+	assert.Greater(t, ttl, time.Duration(0), "a key without TTL must not block forever")
 }
 
 func TestRedisLimiterWindowExpiry(t *testing.T) {
@@ -86,46 +101,66 @@ func TestRedisLimiterWindowExpiry(t *testing.T) {
 	key := redisKey()
 	ctx := context.Background()
 
-	fail(t, l, key, 2)
-	require.False(t, allow(t, l, key))
-
-	require.NoError(t, client.PExpire(ctx, "ratelimit:login:"+key, time.Millisecond).Err())
+	reserveN(t, l, key, 2)
+	require.NoError(t, client.PExpire(ctx, auth.RedisLoginKeyPrefix+key, time.Millisecond).Err())
 	assert.Eventually(t, func() bool {
-		ok, err := l.Allow(ctx, key)
-		return err == nil && ok
+		n, err := client.Exists(ctx, auth.RedisLoginKeyPrefix+key).Result()
+		return err == nil && n == 0
 	}, 5*time.Second, 5*time.Millisecond)
 
-	fail(t, l, key, 1)
-	ttl, err := client.TTL(ctx, "ratelimit:login:"+key).Result()
-	require.NoError(t, err)
-	assert.Greater(t, ttl, time.Duration(0), "a fresh window must start after expiry")
+	r := reserve(t, l, key)
+	assert.True(t, r.Allowed)
+	assert.Equal(t, 1, r.Attempts)
 }
 
-func TestRedisLimiterConcurrentFailuresAreCounted(t *testing.T) {
+func TestRedisLimiterConcurrentReservationsAreBounded(t *testing.T) {
 	client := testutil.NewRedis(t)
-	const workers = 25
-	l := auth.NewRedisLimiter(client, workers, time.Minute)
+	const maxAttempts = 5
+	l := auth.NewRedisLimiter(client, maxAttempts, time.Minute)
 	key := redisKey()
 
-	var wg sync.WaitGroup
-	errs := make(chan error, workers)
-	for range workers {
+	var (
+		wg      sync.WaitGroup
+		allowed atomic.Int32
+	)
+	for range 50 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- l.RecordFailure(context.Background(), key)
+			r, err := l.Reserve(context.Background(), key)
+			assert.NoError(t, err)
+			if r.Allowed {
+				allowed.Add(1)
+			}
 		}()
 	}
 	wg.Wait()
-	close(errs)
-	for err := range errs {
-		require.NoError(t, err)
-	}
+	assert.Equal(t, int32(maxAttempts), allowed.Load())
 
-	n, err := client.Get(context.Background(), "ratelimit:login:"+key).Int()
+	n, err := client.Get(context.Background(), auth.RedisLoginKeyPrefix+key).Int()
 	require.NoError(t, err)
-	assert.Equal(t, workers, n)
-	assert.False(t, allow(t, l, key))
+	assert.Equal(t, 50, n)
+}
+
+func TestServiceConcurrentLoginsWithRedisLimiter(t *testing.T) {
+	client := testutil.NewRedis(t)
+	f := newFixture(t)
+	f.register(t, "alice@example.com", "password1")
+	hasher := newSlowHasher(f.hasher, 20*time.Millisecond)
+	svc := auth.NewService(auth.Deps{
+		Store:      f.store,
+		Hasher:     hasher,
+		Access:     f.jwt,
+		Limiter:    auth.NewRedisLimiter(client, 5, time.Minute),
+		Clock:      f.clock,
+		RefreshTTL: refreshTTL,
+	})
+	ip := redisKey()
+
+	results := concurrentLogins(svc, 50, auth.LoginInput{Email: "alice@example.com", Password: "wrong-password", ClientIP: ip})
+	assert.LessOrEqual(t, hasher.verifies.Load(), int32(5))
+	assert.Equal(t, 5, results[domain.ErrInvalidCredential])
+	assert.Equal(t, 45, results[domain.ErrRateLimited])
 }
 
 func TestServiceLoginWithRedisLimiterSixthAttempt(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -62,19 +63,22 @@ func TestAuthEndpointsErrorMapping(t *testing.T) {
 		wantStatus  int
 		wantCode    string
 		wantMessage string
-		retryAfter  bool
+		retryAfter  string
 	}{
-		{"validation", validation, http.StatusBadRequest, httpapi.CodeValidation, "email: is invalid", false},
-		{"wrapped validation", errors.Join(errors.New("ctx"), validation), http.StatusBadRequest, httpapi.CodeValidation, "", false},
-		{"email taken", domain.ErrEmailTaken, http.StatusConflict, httpapi.CodeEmailTaken, "", false},
-		{"invalid credentials", domain.ErrInvalidCredential, http.StatusUnauthorized, httpapi.CodeLoginFailed, "", false},
-		{"rate limited", domain.ErrRateLimited, http.StatusTooManyRequests, httpapi.CodeRateLimited, "", true},
-		{"token invalid", domain.ErrTokenInvalid, http.StatusUnauthorized, httpapi.CodeInvalidToken, "", false},
-		{"token expired", domain.ErrTokenExpired, http.StatusUnauthorized, httpapi.CodeTokenExpired, "", false},
-		{"token reused", domain.ErrTokenReused, http.StatusUnauthorized, httpapi.CodeTokenReused, "", false},
-		{"not found", domain.ErrNotFound, http.StatusNotFound, httpapi.CodeNotFound, "", false},
-		{"forbidden", domain.ErrForbidden, http.StatusForbidden, httpapi.CodeForbidden, "", false},
-		{"unexpected", errors.New("db is down"), http.StatusInternalServerError, httpapi.CodeInternal, "internal server error", false},
+		{"validation", validation, http.StatusBadRequest, httpapi.CodeValidation, "email: is invalid", ""},
+		{"wrapped validation", errors.Join(errors.New("ctx"), validation), http.StatusBadRequest, httpapi.CodeValidation, "", ""},
+		{"email taken", domain.ErrEmailTaken, http.StatusConflict, httpapi.CodeEmailTaken, "", ""},
+		{"invalid credentials", domain.ErrInvalidCredential, http.StatusUnauthorized, httpapi.CodeLoginFailed, "", ""},
+		{"rate limited", domain.ErrRateLimited, http.StatusTooManyRequests, httpapi.CodeRateLimited, "", "60"},
+		{"rate limited with window", &domain.RateLimitError{RetryAfter: 12500 * time.Millisecond}, http.StatusTooManyRequests, httpapi.CodeRateLimited, "", "13"},
+		{"overloaded", domain.ErrOverloaded, http.StatusServiceUnavailable, httpapi.CodeOverloaded, "", "1"},
+		{"busy", domain.ErrBusy, http.StatusServiceUnavailable, httpapi.CodeBusy, "", "1"},
+		{"token invalid", domain.ErrTokenInvalid, http.StatusUnauthorized, httpapi.CodeInvalidToken, "", ""},
+		{"token expired", domain.ErrTokenExpired, http.StatusUnauthorized, httpapi.CodeTokenExpired, "", ""},
+		{"token reused", domain.ErrTokenReused, http.StatusUnauthorized, httpapi.CodeTokenReused, "", ""},
+		{"not found", domain.ErrNotFound, http.StatusNotFound, httpapi.CodeNotFound, "", ""},
+		{"forbidden", domain.ErrForbidden, http.StatusForbidden, httpapi.CodeForbidden, "", ""},
+		{"unexpected", errors.New("db is down"), http.StatusInternalServerError, httpapi.CodeInternal, "internal server error", ""},
 	}
 
 	endpoints := []struct {
@@ -123,11 +127,7 @@ func TestAuthEndpointsErrorMapping(t *testing.T) {
 				if tt.wantMessage != "" {
 					assert.Equal(t, tt.wantMessage, msg)
 				}
-				if tt.retryAfter {
-					assert.Equal(t, "60", rec.Header().Get("Retry-After"))
-				} else {
-					assert.Empty(t, rec.Header().Get("Retry-After"))
-				}
+				assert.Equal(t, tt.retryAfter, rec.Header().Get("Retry-After"))
 				assert.NotContains(t, rec.Body.String(), "db is down")
 			})
 		}

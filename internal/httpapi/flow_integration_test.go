@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -230,7 +231,9 @@ func TestFlowLoginRateLimit(t *testing.T) {
 	}
 	rec := f.login(t, alice.email, "wrong-password")
 	require.Equal(t, http.StatusTooManyRequests, rec.Code)
-	assert.Equal(t, "60", rec.Header().Get("Retry-After"))
+	retryAfter, err := strconv.Atoi(rec.Header().Get("Retry-After"))
+	require.NoError(t, err)
+	assert.True(t, retryAfter >= 1 && retryAfter <= 60, "retry after %d", retryAfter)
 	code, _ := rec.errorBody(t)
 	assert.Equal(t, httpapi.CodeRateLimited, code)
 

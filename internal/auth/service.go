@@ -44,7 +44,7 @@ type Service struct {
 	tokens     TokenGenerator
 	refreshTTL time.Duration
 
-	dummyOnce sync.Once
+	dummyMu   sync.Mutex
 	dummyHash string
 }
 
@@ -92,7 +92,7 @@ type LoginInput struct {
 }
 
 func (s *Service) Register(ctx context.Context, in RegisterInput) (Session, error) {
-	user, err := s.newUser(in)
+	user, err := s.newUser(ctx, in)
 	if err != nil {
 		return Session{}, err
 	}
@@ -103,7 +103,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (Session, erro
 	return s.startSession(ctx, created)
 }
 
-func (s *Service) newUser(in RegisterInput) (domain.User, error) {
+func (s *Service) newUser(ctx context.Context, in RegisterInput) (domain.User, error) {
 	email, err := domain.NormalizeEmail(in.Email)
 	if err != nil {
 		return domain.User{}, err
@@ -119,7 +119,7 @@ func (s *Service) newUser(in RegisterInput) (domain.User, error) {
 	if err != nil {
 		return domain.User{}, err
 	}
-	hash, err := s.hasher.Hash(in.Password)
+	hash, err := s.hasher.Hash(ctx, in.Password)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -153,12 +153,12 @@ func (s *Service) startSession(ctx context.Context, user domain.User) (Session, 
 
 func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	key := LoginKey(in.ClientIP, in.Email)
-	allowed, err := s.limiter.Allow(ctx, key)
+	res, err := s.limiter.Reserve(ctx, key)
 	if err != nil {
 		return Session{}, err
 	}
-	if !allowed {
-		return Session{}, domain.ErrRateLimited
+	if !res.Allowed {
+		return Session{}, &domain.RateLimitError{RetryAfter: res.RetryAfter}
 	}
 
 	user, ok, err := s.authenticate(ctx, in.Email, in.Password)
@@ -166,9 +166,6 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 		return Session{}, err
 	}
 	if !ok {
-		if err := s.limiter.RecordFailure(ctx, key); err != nil {
-			return Session{}, err
-		}
 		return Session{}, domain.ErrInvalidCredential
 	}
 	if err := s.limiter.Reset(ctx, key); err != nil {
@@ -180,31 +177,45 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 func (s *Service) authenticate(ctx context.Context, rawEmail, password string) (domain.User, bool, error) {
 	email, err := domain.NormalizeEmail(rawEmail)
 	if err != nil || password == "" || len(password) > maxLoginPasswordBytes {
-		s.burnHash(password)
-		return domain.User{}, false, nil
+		return domain.User{}, false, s.burnHash(ctx, password)
 	}
 	user, err := s.store.GetUserByEmail(ctx, email)
 	if errors.Is(err, domain.ErrNotFound) {
-		s.burnHash(password)
-		return domain.User{}, false, nil
+		return domain.User{}, false, s.burnHash(ctx, password)
 	}
 	if err != nil {
 		return domain.User{}, false, err
 	}
-	ok, err := s.hasher.Verify(password, user.PasswordHash)
+	ok, err := s.hasher.Verify(ctx, password, user.PasswordHash)
 	if err != nil {
 		return domain.User{}, false, fmt.Errorf("verify password: %w", err)
 	}
 	return user, ok, nil
 }
 
-func (s *Service) burnHash(password string) {
-	s.dummyOnce.Do(func() {
-		s.dummyHash, _ = s.hasher.Hash(dummyPassword)
-	})
-	if s.dummyHash != "" {
-		_, _ = s.hasher.Verify(password, s.dummyHash)
+func (s *Service) burnHash(ctx context.Context, password string) error {
+	dummy, err := s.dummy(ctx)
+	if err != nil {
+		return err
 	}
+	if _, err := s.hasher.Verify(ctx, password, dummy); err != nil {
+		return fmt.Errorf("verify password: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) dummy(ctx context.Context) (string, error) {
+	s.dummyMu.Lock()
+	defer s.dummyMu.Unlock()
+	if s.dummyHash != "" {
+		return s.dummyHash, nil
+	}
+	hash, err := s.hasher.Hash(ctx, dummyPassword)
+	if err != nil {
+		return "", fmt.Errorf("hash dummy password: %w", err)
+	}
+	s.dummyHash = hash
+	return hash, nil
 }
 
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {

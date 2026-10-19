@@ -1,19 +1,24 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/argon2"
+
+	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
 type PasswordHasher interface {
-	Hash(password string) (string, error)
-	Verify(password, encoded string) (bool, error)
+	Hash(ctx context.Context, password string) (string, error)
+	Verify(ctx context.Context, password, encoded string) (bool, error)
 }
 
 type Argon2Params struct {
@@ -34,15 +39,69 @@ var DefaultArgon2Params = Argon2Params{
 
 var ErrInvalidHash = errors.New("invalid password hash format")
 
+const DefaultHashAcquireTimeout = 2 * time.Second
+
 type Argon2Hasher struct {
-	params Argon2Params
+	params         Argon2Params
+	slots          chan struct{}
+	acquireTimeout time.Duration
 }
 
-func NewArgon2Hasher(params Argon2Params) *Argon2Hasher {
-	return &Argon2Hasher{params: params}
+type HasherOption func(*Argon2Hasher)
+
+func WithMaxConcurrent(n int) HasherOption {
+	return func(h *Argon2Hasher) {
+		if n > 0 {
+			h.slots = make(chan struct{}, n)
+		}
+	}
 }
 
-func (h *Argon2Hasher) Hash(password string) (string, error) {
+func WithAcquireTimeout(d time.Duration) HasherOption {
+	return func(h *Argon2Hasher) {
+		if d > 0 {
+			h.acquireTimeout = d
+		}
+	}
+}
+
+func NewArgon2Hasher(params Argon2Params, opts ...HasherOption) *Argon2Hasher {
+	h := &Argon2Hasher{
+		params:         params,
+		slots:          make(chan struct{}, runtime.GOMAXPROCS(0)),
+		acquireTimeout: DefaultHashAcquireTimeout,
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+func (h *Argon2Hasher) acquire(ctx context.Context) (func(), error) {
+	release := func() { <-h.slots }
+	select {
+	case h.slots <- struct{}{}:
+		return release, nil
+	default:
+	}
+	timer := time.NewTimer(h.acquireTimeout)
+	defer timer.Stop()
+	select {
+	case h.slots <- struct{}{}:
+		return release, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer.C:
+		return nil, domain.ErrOverloaded
+	}
+}
+
+func (h *Argon2Hasher) Hash(ctx context.Context, password string) (string, error) {
+	release, err := h.acquire(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	salt := make([]byte, h.params.SaltLength)
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("generate salt: %w", err)
@@ -56,7 +115,7 @@ func (h *Argon2Hasher) Hash(password string) (string, error) {
 	), nil
 }
 
-func (h *Argon2Hasher) Verify(password, encoded string) (bool, error) {
+func (h *Argon2Hasher) Verify(ctx context.Context, password, encoded string) (bool, error) {
 	params, salt, key, err := decodeArgon2(encoded)
 	if err != nil {
 		return false, err
@@ -65,6 +124,11 @@ func (h *Argon2Hasher) Verify(password, encoded string) (bool, error) {
 	if keyLen == 0 || keyLen > 1024 {
 		return false, ErrInvalidHash
 	}
+	release, err := h.acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	other := argon2.IDKey([]byte(password), salt, params.Iterations, params.Memory, params.Parallelism, uint32(keyLen))
 	return subtle.ConstantTimeCompare(key, other) == 1, nil
 }

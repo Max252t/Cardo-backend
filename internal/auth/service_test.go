@@ -22,6 +22,7 @@ type fixture struct {
 	clock   *fakeClock
 	limiter *auth.MemoryLimiter
 	jwt     *auth.JWTManager
+	hasher  *auth.Argon2Hasher
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -30,16 +31,17 @@ func newFixture(t *testing.T) *fixture {
 	store := newFakeStore()
 	limiter := auth.NewMemoryLimiter(5, time.Minute, clock)
 	jwtm := newJWT(clock)
+	hasher := auth.NewArgon2Hasher(fastArgon2)
 	svc := auth.NewService(auth.Deps{
 		Store:      store,
-		Hasher:     auth.NewArgon2Hasher(fastArgon2),
+		Hasher:     hasher,
 		Access:     jwtm,
 		Limiter:    limiter,
 		Clock:      clock,
 		Tokens:     &seqTokens{},
 		RefreshTTL: refreshTTL,
 	})
-	return &fixture{svc: svc, store: store, clock: clock, limiter: limiter, jwt: jwtm}
+	return &fixture{svc: svc, store: store, clock: clock, limiter: limiter, jwt: jwtm, hasher: hasher}
 }
 
 func (f *fixture) register(t *testing.T, email, password string) auth.Session {
@@ -292,18 +294,10 @@ func TestLoginInfrastructureErrors(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("boom")
 
-	t.Run("limiter allow", func(t *testing.T) {
+	t.Run("limiter reserve", func(t *testing.T) {
 		t.Parallel()
 		f := newFixture(t)
-		svc := auth.NewService(auth.Deps{Store: f.store, Hasher: auth.NewArgon2Hasher(fastArgon2), Access: f.jwt, Limiter: errLimiter{allowErr: boom}, Clock: f.clock, RefreshTTL: refreshTTL})
-		_, err := svc.Login(context.Background(), auth.LoginInput{Email: "a@b.co", Password: "password1"})
-		assert.ErrorIs(t, err, boom)
-	})
-
-	t.Run("limiter record failure", func(t *testing.T) {
-		t.Parallel()
-		f := newFixture(t)
-		svc := auth.NewService(auth.Deps{Store: f.store, Hasher: auth.NewArgon2Hasher(fastArgon2), Access: f.jwt, Limiter: errLimiter{recordErr: boom}, Clock: f.clock, RefreshTTL: refreshTTL})
+		svc := auth.NewService(auth.Deps{Store: f.store, Hasher: auth.NewArgon2Hasher(fastArgon2), Access: f.jwt, Limiter: errLimiter{reserveErr: boom}, Clock: f.clock, RefreshTTL: refreshTTL})
 		_, err := svc.Login(context.Background(), auth.LoginInput{Email: "a@b.co", Password: "password1"})
 		assert.ErrorIs(t, err, boom)
 	})
@@ -483,4 +477,68 @@ func TestNewServiceDefaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, s.Tokens.RefreshToken)
 	assert.WithinDuration(t, time.Now().Add(time.Hour), s.Tokens.RefreshExpiresAt, 5*time.Second)
+}
+
+func TestLoginConcurrentAttemptsCannotBypassLimiter(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.register(t, "alice@example.com", "password1")
+	hasher := newSlowHasher(f.hasher, 20*time.Millisecond)
+	svc := auth.NewService(auth.Deps{
+		Store:      f.store,
+		Hasher:     hasher,
+		Access:     f.jwt,
+		Limiter:    auth.NewMemoryLimiter(5, time.Minute, f.clock),
+		Clock:      f.clock,
+		RefreshTTL: refreshTTL,
+	})
+
+	results := concurrentLogins(svc, 50, auth.LoginInput{Email: "alice@example.com", Password: "wrong-password", ClientIP: "10.0.0.9"})
+	assert.LessOrEqual(t, hasher.verifies.Load(), int32(5))
+	assert.Equal(t, 5, results[domain.ErrInvalidCredential])
+	assert.Equal(t, 45, results[domain.ErrRateLimited])
+}
+
+func TestLoginRateLimitCarriesRetryAfter(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.register(t, "alice@example.com", "password1")
+	for range 5 {
+		_, _ = login(f, "alice@example.com", "bad-password")
+	}
+	f.clock.Advance(15 * time.Second)
+	_, err := login(f, "alice@example.com", "bad-password")
+	var rl *domain.RateLimitError
+	require.ErrorAs(t, err, &rl)
+	assert.Equal(t, 45*time.Second, rl.RetryAfter)
+}
+
+func TestLoginHasherOverloadPropagates(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.register(t, "alice@example.com", "password1")
+	svc := auth.NewService(auth.Deps{
+		Store:      f.store,
+		Hasher:     overloadedHasher{},
+		Access:     f.jwt,
+		Limiter:    auth.NewMemoryLimiter(5, time.Minute, f.clock),
+		Clock:      f.clock,
+		RefreshTTL: refreshTTL,
+	})
+	_, err := svc.Login(context.Background(), auth.LoginInput{Email: "alice@example.com", Password: "password1"})
+	assert.ErrorIs(t, err, domain.ErrOverloaded)
+	_, err = svc.Login(context.Background(), auth.LoginInput{Email: "ghost@example.com", Password: "password1"})
+	assert.ErrorIs(t, err, domain.ErrOverloaded)
+	_, err = svc.Register(context.Background(), auth.RegisterInput{Email: "new@example.com", Password: "password1", DisplayName: "N"})
+	assert.ErrorIs(t, err, domain.ErrOverloaded)
+}
+
+type overloadedHasher struct{}
+
+func (overloadedHasher) Hash(context.Context, string) (string, error) {
+	return "", domain.ErrOverloaded
+}
+
+func (overloadedHasher) Verify(context.Context, string, string) (bool, error) {
+	return false, domain.ErrOverloaded
 }

@@ -2,8 +2,10 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -171,18 +173,65 @@ func (s *fakeStore) token(raw string) (domain.RefreshToken, bool) {
 }
 
 type errLimiter struct {
-	allowErr  error
-	recordErr error
-	resetErr  error
+	reserveErr error
+	resetErr   error
 }
 
-func (l errLimiter) Allow(context.Context, string) (bool, error) {
-	if l.allowErr != nil {
-		return false, l.allowErr
+func (l errLimiter) Reserve(context.Context, string) (auth.Reservation, error) {
+	if l.reserveErr != nil {
+		return auth.Reservation{}, l.reserveErr
 	}
-	return true, nil
+	return auth.Reservation{Allowed: true, Attempts: 1}, nil
 }
-
-func (l errLimiter) RecordFailure(context.Context, string) error { return l.recordErr }
 
 func (l errLimiter) Reset(context.Context, string) error { return l.resetErr }
+
+type slowHasher struct {
+	inner    auth.PasswordHasher
+	delay    time.Duration
+	verifies atomic.Int32
+}
+
+func newSlowHasher(inner auth.PasswordHasher, delay time.Duration) *slowHasher {
+	return &slowHasher{inner: inner, delay: delay}
+}
+
+func (h *slowHasher) Hash(ctx context.Context, password string) (string, error) {
+	return h.inner.Hash(ctx, password)
+}
+
+func (h *slowHasher) Verify(ctx context.Context, password, encoded string) (bool, error) {
+	h.verifies.Add(1)
+	time.Sleep(h.delay)
+	return h.inner.Verify(ctx, password, encoded)
+}
+
+func concurrentLogins(svc *auth.Service, n int, in auth.LoginInput) map[error]int {
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		results = map[error]int{}
+	)
+	start := make(chan struct{})
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := svc.Login(context.Background(), in)
+			key := err
+			switch {
+			case errors.Is(err, domain.ErrRateLimited):
+				key = domain.ErrRateLimited
+			case errors.Is(err, domain.ErrInvalidCredential):
+				key = domain.ErrInvalidCredential
+			}
+			mu.Lock()
+			results[key]++
+			mu.Unlock()
+		}()
+	}
+	close(start)
+	wg.Wait()
+	return results
+}
