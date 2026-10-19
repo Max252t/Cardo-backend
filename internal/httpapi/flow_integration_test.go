@@ -52,15 +52,32 @@ const (
 type flow struct {
 	router *gin.Engine
 	pool   *pgxpool.Pool
+	store  *storage.Store
 	clock  *flowClock
 }
 
 func newFlow(t *testing.T) *flow {
 	t.Helper()
+	return buildFlow(t, true)
+}
+
+func newBoardFlow(t *testing.T) *flow {
+	t.Helper()
+	return buildFlow(t, false)
+}
+
+func buildFlow(t *testing.T, withRedis bool) *flow {
+	t.Helper()
 	pool := testutil.NewMigratedPool(t)
 	store := storage.New(pool)
-	redisClient := testutil.NewRedis(t)
 	clock := &flowClock{now: time.Now()}
+	var limiter auth.LoginLimiter = auth.NewMemoryLimiter(5, time.Minute, clock)
+	readiness := map[string]httpapi.Checker{"postgres": store}
+	if withRedis {
+		redisClient := testutil.NewRedis(t)
+		limiter = auth.NewRedisLimiter(redisClient, 5, time.Minute)
+		readiness["redis"] = httpapi.CheckerFunc(func(ctx context.Context) error { return redisClient.Ping(ctx).Err() })
+	}
 
 	jwtm := auth.NewJWTManager(auth.JWTConfig{
 		Secret:   []byte("0123456789abcdef0123456789abcdef"),
@@ -72,22 +89,19 @@ func newFlow(t *testing.T) *flow {
 		Store:      store,
 		Hasher:     auth.NewArgon2Hasher(auth.Argon2Params{Memory: 8, Iterations: 1, Parallelism: 1, SaltLength: 8, KeyLength: 16}),
 		Access:     jwtm,
-		Limiter:    auth.NewRedisLimiter(redisClient, 5, time.Minute),
+		Limiter:    limiter,
 		Clock:      clock,
 		RefreshTTL: flowRefreshTTL,
 	})
 	router, err := httpapi.NewRouter(httpapi.Deps{
-		Auth:   authSvc,
-		Tokens: jwtm,
-		Users:  users.NewService(store),
-		Boards: boards.NewService(store),
-		Readiness: map[string]httpapi.Checker{
-			"postgres": store,
-			"redis":    httpapi.CheckerFunc(func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }),
-		},
+		Auth:      authSvc,
+		Tokens:    jwtm,
+		Users:     users.NewService(store),
+		Boards:    boards.NewService(store),
+		Readiness: readiness,
 	})
 	require.NoError(t, err)
-	return &flow{router: router, pool: pool, clock: clock}
+	return &flow{router: router, pool: pool, store: store, clock: clock}
 }
 
 func (f *flow) do(t *testing.T, method, path, body, token string) response {
