@@ -437,3 +437,11 @@ func FromEventPage(p domain.EventPage) EventsPage {
 	}
 	return out
 }
+
+func NewOp(opType string, opID uuid.UUID, payload any) (Op, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return Op{}, err
+	}
+	return Op{Type: opType, OpID: opID, Payload: data}, nil
+}

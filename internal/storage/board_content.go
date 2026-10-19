@@ -288,3 +288,22 @@ func checkReranked(table string, affected int64, want int, err error) error {
 	}
 	return nil
 }
+
+func (b *BoardTx) Savepoint(ctx context.Context, fn BoardTxFunc) error {
+	sp, err := b.tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin savepoint: %w", err)
+	}
+	child := &BoardTx{tx: sp, board: b.board}
+	if err := fn(ctx, child); err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil {
+			return errors.Join(err, rbErr)
+		}
+		return err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return fmt.Errorf("release savepoint: %w", err)
+	}
+	b.board = child.board
+	return nil
+}
