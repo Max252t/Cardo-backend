@@ -9,11 +9,17 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
-type Service struct {
-	store *storage.Store
+type Store interface {
+	ListBoardsForUser(ctx context.Context, userID uuid.UUID) ([]domain.BoardWithRole, error)
+	CreateBoardWithOwner(ctx context.Context, b domain.Board) (domain.BoardWithRole, error)
+	WithBoardLock(ctx context.Context, boardID uuid.UUID, fn storage.BoardTxFunc) error
 }
 
-func NewService(store *storage.Store) *Service {
+type Service struct {
+	store Store
+}
+
+func NewService(store Store) *Service {
 	return &Service{store: store}
 }
 
@@ -50,11 +56,7 @@ func (s *Service) Rename(ctx context.Context, userID, boardID uuid.UUID, title s
 		if err := btx.SetTitle(ctx, clean); err != nil {
 			return err
 		}
-		ev, err = btx.AppendEvent(ctx, storage.EventInput{
-			Type:    domain.EventBoardRenamed,
-			Payload: map[string]string{"title": clean},
-			ActorID: &userID,
-		})
+		ev, err = appendUserEvent(ctx, btx, userID, domain.EventBoardRenamed, map[string]string{"title": clean})
 		if err != nil {
 			return err
 		}
@@ -71,15 +73,18 @@ func (s *Service) Delete(ctx context.Context, userID, boardID uuid.UUID) (domain
 			return err
 		}
 		var err error
-		ev, err = btx.AppendEvent(ctx, storage.EventInput{
-			Type:    domain.EventBoardDeleted,
-			Payload: map[string]string{},
-			ActorID: &userID,
-		})
-		if err != nil {
+		if ev, err = appendUserEvent(ctx, btx, userID, domain.EventBoardDeleted, map[string]string{}); err != nil {
 			return err
 		}
 		return btx.MarkDeleted(ctx)
 	})
 	return ev, err
+}
+
+func appendUserEvent(ctx context.Context, btx *storage.BoardTx, actorID uuid.UUID, eventType string, payload any) (domain.Event, error) {
+	return btx.AppendEvent(ctx, storage.EventInput{
+		Type:    eventType,
+		Payload: payload,
+		ActorID: &actorID,
+	})
 }

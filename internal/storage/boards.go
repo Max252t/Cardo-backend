@@ -74,12 +74,14 @@ type EventInput struct {
 	ActorID *uuid.UUID
 }
 
+type BoardTxFunc func(ctx context.Context, btx *BoardTx) error
+
 type BoardTx struct {
 	tx    pgx.Tx
 	board domain.Board
 }
 
-func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn func(ctx context.Context, btx *BoardTx) error) error {
+func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn BoardTxFunc) error {
 	return s.InTx(ctx, func(tx pgx.Tx) error {
 		board, err := scanBoard(tx.QueryRow(ctx,
 			`SELECT `+boardColumns+` FROM boards b WHERE b.id = $1 AND b.deleted_at IS NULL FOR UPDATE`,
