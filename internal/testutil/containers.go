@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -56,12 +57,49 @@ func Terminate() {
 	}
 }
 
+var (
+	dockerOnce sync.Once
+	dockerErr  error
+)
+
+func dockerRequired() bool {
+	return strings.EqualFold(os.Getenv("CI"), "true") || os.Getenv("REQUIRE_DOCKER") == "1"
+}
+
+func dockerHealth() error {
+	dockerOnce.Do(func() {
+		dockerErr = probeDocker()
+	})
+	return dockerErr
+}
+
+func probeDocker() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("docker provider panicked: %v", r)
+		}
+	}()
+	provider, err := testcontainers.ProviderDocker.GetProvider()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = provider.Close() }()
+	return provider.Health(context.Background())
+}
+
 func requireDocker(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test skipped in short mode")
 	}
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	err := dockerHealth()
+	if err == nil {
+		return
+	}
+	if dockerRequired() {
+		t.Fatalf("docker is required (CI=true or REQUIRE_DOCKER=1) but unavailable: %v", err)
+	}
+	t.Skipf("docker is not available, skipping integration test: %v", err)
 }
 
 func startPostgres(ctx context.Context) (testcontainers.Container, string, error) {
