@@ -70,10 +70,12 @@ func (f *fakeUsers) UpdateProfile(ctx context.Context, id uuid.UUID, upd domain.
 }
 
 type fakeBoards struct {
-	list   func(ctx context.Context, userID uuid.UUID) ([]domain.BoardWithRole, error)
-	create func(ctx context.Context, userID uuid.UUID, title string) (domain.BoardWithRole, error)
-	rename func(ctx context.Context, userID, boardID uuid.UUID, title string) (domain.BoardWithRole, domain.Event, error)
-	delete func(ctx context.Context, userID, boardID uuid.UUID) (domain.Event, error)
+	list     func(ctx context.Context, userID uuid.UUID) ([]domain.BoardWithRole, error)
+	create   func(ctx context.Context, userID uuid.UUID, title string) (domain.BoardWithRole, error)
+	rename   func(ctx context.Context, userID, boardID uuid.UUID, title string) (domain.BoardWithRole, domain.Event, error)
+	delete   func(ctx context.Context, userID, boardID uuid.UUID) (domain.Event, error)
+	snapshot func(ctx context.Context, userID, boardID uuid.UUID) (domain.BoardSnapshot, error)
+	events   func(ctx context.Context, userID, boardID uuid.UUID, afterSeq int64) (domain.EventPage, error)
 }
 
 func (f *fakeBoards) List(ctx context.Context, userID uuid.UUID) ([]domain.BoardWithRole, error) {
@@ -223,4 +225,12 @@ func samplePair() auth.TokenPair {
 		RefreshToken:     "refresh-1",
 		RefreshExpiresAt: time.Now().Add(7 * 24 * time.Hour),
 	}
+}
+
+func (f *fakeBoards) Snapshot(ctx context.Context, userID, boardID uuid.UUID) (domain.BoardSnapshot, error) {
+	return f.snapshot(ctx, userID, boardID)
+}
+
+func (f *fakeBoards) Events(ctx context.Context, userID, boardID uuid.UUID, afterSeq int64) (domain.EventPage, error) {
+	return f.events(ctx, userID, boardID, afterSeq)
 }

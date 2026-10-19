@@ -2,8 +2,12 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 const boardIDParam = "id"
@@ -35,7 +39,7 @@ func (h *handlers) createBoard(c *gin.Context) {
 }
 
 func (h *handlers) renameBoard(c *gin.Context) {
-	boardID, ok := h.uuidParam(c, boardIDParam)
+	boardID, ok := h.boardIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -52,7 +56,7 @@ func (h *handlers) renameBoard(c *gin.Context) {
 }
 
 func (h *handlers) deleteBoard(c *gin.Context) {
-	boardID, ok := h.uuidParam(c, boardIDParam)
+	boardID, ok := h.boardIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -61,4 +65,40 @@ func (h *handlers) deleteBoard(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *handlers) getBoard(c *gin.Context) {
+	boardID, ok := h.boardIDFromPath(c)
+	if !ok {
+		return
+	}
+	snap, err := h.boards.Snapshot(c, currentUserID(c), boardID)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, protocol.FromSnapshot(snap))
+}
+
+func (h *handlers) boardEvents(c *gin.Context) {
+	boardID, ok := h.boardIDFromPath(c)
+	if !ok {
+		return
+	}
+	raw, present := c.GetQuery("after_seq")
+	if !present {
+		h.fail(c, domain.NewValidationError("after_seq", "is required"))
+		return
+	}
+	afterSeq, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || afterSeq < 0 {
+		h.fail(c, domain.NewValidationError("after_seq", "must be a non-negative integer"))
+		return
+	}
+	page, err := h.boards.Events(c, currentUserID(c), boardID, afterSeq)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, protocol.FromEventPage(page))
 }

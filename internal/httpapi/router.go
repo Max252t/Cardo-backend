@@ -36,6 +36,8 @@ type BoardService interface {
 	Create(ctx context.Context, userID uuid.UUID, title string) (domain.BoardWithRole, error)
 	Rename(ctx context.Context, userID, boardID uuid.UUID, title string) (domain.BoardWithRole, domain.Event, error)
 	Delete(ctx context.Context, userID, boardID uuid.UUID) (domain.Event, error)
+	Snapshot(ctx context.Context, userID, boardID uuid.UUID) (domain.BoardSnapshot, error)
+	Events(ctx context.Context, userID, boardID uuid.UUID, afterSeq int64) (domain.EventPage, error)
 }
 
 type Checker interface {
@@ -141,5 +143,7 @@ func (h *handlers) registerRoutes(r *gin.Engine) {
 	user.GET("/boards", h.listBoards)
 	user.POST("/boards", h.createBoard)
 	user.PATCH("/boards/:"+boardIDParam, h.renameBoard)
+	user.GET("/boards/:"+boardIDParam, h.getBoard)
 	user.DELETE("/boards/:"+boardIDParam, h.deleteBoard)
+	user.GET("/boards/:"+boardIDParam+"/events", h.boardEvents)
 }

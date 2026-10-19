@@ -163,7 +163,8 @@ func TestMethodNotAllowed(t *testing.T) {
 		{http.MethodPut, "/api/me"},
 		{http.MethodDelete, "/api/me"},
 		{http.MethodPut, "/api/boards"},
-		{http.MethodGet, "/api/boards/22222222-2222-7222-8222-222222222222"},
+		{http.MethodPut, "/api/boards/22222222-2222-7222-8222-222222222222"},
+		{http.MethodPost, "/api/boards/22222222-2222-7222-8222-222222222222/events"},
 		{http.MethodPost, "/api/boards/22222222-2222-7222-8222-222222222222"},
 	}
 	for _, tt := range tests {

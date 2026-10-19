@@ -41,10 +41,10 @@ func (h *handlers) bindJSON(c *gin.Context, dst any) bool {
 	return true
 }
 
-func (h *handlers) uuidParam(c *gin.Context, name string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(c.Param(name))
+func (h *handlers) boardIDFromPath(c *gin.Context) (uuid.UUID, bool) {
+	id, err := uuid.Parse(c.Param(boardIDParam))
 	if err != nil {
-		h.fail(c, domain.NewValidationError(name, "must be a UUID"))
+		h.fail(c, domain.NewValidationError(boardIDParam, "must be a UUID"))
 		return uuid.Nil, false
 	}
 	return id, true
