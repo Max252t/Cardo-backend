@@ -18,7 +18,7 @@ Several users move and edit cards on the same board simultaneously and see each 
 
 | Layer | Technology |
 |-------|------------|
-| Language | Go 1.24+ |
+| Language | Go 1.26+ |
 | HTTP | Gin |
 | WebSocket | gorilla/websocket |
 | Database | PostgreSQL 15+ (pgx) |
@@ -78,7 +78,7 @@ deploy/           nginx and infrastructure configs
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.26+
 - Docker and Docker Compose
 
 ### Run with Docker Compose
