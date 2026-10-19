@@ -24,14 +24,16 @@ func TestMain(m *testing.M) {
 }
 
 type recorder struct {
-	mu     sync.Mutex
-	events []domain.Event
+	mu      sync.Mutex
+	events  []domain.Event
+	batches [][]domain.Event
 }
 
 func (r *recorder) Publish(_ context.Context, events []domain.Event) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.events = append(r.events, events...)
+	r.batches = append(r.batches, append([]domain.Event(nil), events...))
 	return nil
 }
 
