@@ -132,13 +132,10 @@ func (s *Service) Delete(ctx context.Context, userID, boardID uuid.UUID) (domain
 }
 
 func (s *Service) publish(ctx context.Context, ev domain.Event) {
-	if err := s.publisher.Publish(context.WithoutCancel(ctx), []domain.Event{ev}); err != nil {
-		s.logger.WarnContext(ctx, "publish board event failed",
-			slog.String("board_id", ev.BoardID.String()),
-			slog.Int64("seq", ev.Seq),
-			slog.Any("error", err),
-		)
-	}
+	pubsub.PublishDetached(ctx, s.publisher, s.logger, "publish board event failed", []domain.Event{ev},
+		slog.String("board_id", ev.BoardID.String()),
+		slog.Int64("seq", ev.Seq),
+	)
 }
 
 func appendUserEvent(ctx context.Context, btx *storage.BoardTx, actorID uuid.UUID, eventType string, payload any) (domain.Event, error) {
