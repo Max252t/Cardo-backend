@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -256,4 +257,32 @@ func TestLoggerDoesNotLogAuthorizationOrBodies(t *testing.T) {
 	assert.Contains(t, logs, "http request")
 	assert.NotContains(t, logs, "hunter2hunter2")
 	assert.NotContains(t, logs, "Bearer good")
+}
+
+func TestReadyzReportsShutdownBeforeChecks(t *testing.T) {
+	t.Parallel()
+	var draining atomic.Bool
+	pinged := false
+	e := newEnv(t)
+	e.readiness = map[string]httpapi.Checker{"postgres": httpapi.CheckerFunc(func(context.Context) error {
+		pinged = true
+		return nil
+	})}
+	e.shuttingDown = draining.Load
+
+	rec := e.do(t, request{method: http.MethodGet, path: "/readyz"})
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, pinged)
+
+	pinged = false
+	draining.Store(true)
+	rec = e.do(t, request{method: http.MethodGet, path: "/readyz"})
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	code, _ := rec.errorBody(t)
+	assert.Equal(t, httpapi.CodeShuttingDown, code)
+	assert.Equal(t, "1", rec.Header().Get("Retry-After"))
+	assert.False(t, pinged, "dependency checks are skipped while draining")
+
+	rec = e.do(t, request{method: http.MethodGet, path: "/healthz"})
+	assert.Equal(t, http.StatusOK, rec.Code, "liveness stays green while draining")
 }

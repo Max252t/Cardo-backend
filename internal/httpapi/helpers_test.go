@@ -93,13 +93,14 @@ func (f *fakeBoards) Delete(ctx context.Context, userID, boardID uuid.UUID) (dom
 }
 
 type env struct {
-	auth      *fakeAuth
-	tokens    *fakeTokens
-	users     *fakeUsers
-	boards    *fakeBoards
-	readiness map[string]httpapi.Checker
-	maxBody   int64
-	router    *gin.Engine
+	auth         *fakeAuth
+	tokens       *fakeTokens
+	users        *fakeUsers
+	boards       *fakeBoards
+	readiness    map[string]httpapi.Checker
+	maxBody      int64
+	shuttingDown func() bool
+	router       *gin.Engine
 }
 
 func newEnv(t *testing.T) *env {
@@ -127,6 +128,7 @@ func (e *env) build(t *testing.T) *gin.Engine {
 		Boards:       e.boards,
 		Readiness:    e.readiness,
 		MaxBodyBytes: e.maxBody,
+		ShuttingDown: e.shuttingDown,
 	})
 	require.NoError(t, err)
 	e.router = r

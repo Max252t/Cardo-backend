@@ -22,6 +22,14 @@ func (h *handlers) healthz(c *gin.Context) {
 }
 
 func (h *handlers) readyz(c *gin.Context) {
+	if h.shuttingDown != nil && h.shuttingDown() {
+		c.Header("Retry-After", unavailableRetryAfter)
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, readinessResponse{
+			Error:  &ErrorBody{Code: CodeShuttingDown, Message: "server is shutting down"},
+			Checks: map[string]string{},
+		})
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), readinessTimeout)
 	defer cancel()
 	checks, failed := h.runReadinessChecks(ctx)

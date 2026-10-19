@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -77,6 +79,9 @@ func run() error {
 		RefreshTTL: cfg.RefreshTokenTTL,
 	})
 
+	lc := newLifecycle()
+	defer lc.cancelBase()
+
 	gin.SetMode(gin.ReleaseMode)
 	router, err := httpapi.NewRouter(httpapi.Deps{
 		Logger:         logger,
@@ -85,6 +90,7 @@ func run() error {
 		Users:          users.NewService(store),
 		Boards:         boards.NewService(store),
 		Readiness:      readiness,
+		ShuttingDown:   lc.draining.Load,
 		TrustedProxies: cfg.TrustedProxies,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
 	})
@@ -92,7 +98,7 @@ func run() error {
 		return err
 	}
 
-	return serve(ctx, stop, newHTTPServer(cfg, router, logger), cfg.ShutdownTimeout, logger)
+	return serve(ctx, stop, newHTTPServer(cfg, router, logger, lc.baseCtx), lc, cfg, logger)
 }
 
 func openDatabase(ctx context.Context, cfg config.Config, logger *slog.Logger) (*pgxpool.Pool, error) {
@@ -138,7 +144,18 @@ func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) 
 	return auth.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)
 }
 
-func newHTTPServer(cfg config.Config, handler http.Handler, logger *slog.Logger) *http.Server {
+type lifecycle struct {
+	draining   atomic.Bool
+	baseCtx    context.Context
+	cancelBase context.CancelFunc
+}
+
+func newLifecycle() *lifecycle {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &lifecycle{baseCtx: ctx, cancelBase: cancel}
+}
+
+func newHTTPServer(cfg config.Config, handler http.Handler, logger *slog.Logger, baseCtx context.Context) *http.Server {
 	return &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,
@@ -147,10 +164,11 @@ func newHTTPServer(cfg config.Config, handler http.Handler, logger *slog.Logger)
 		WriteTimeout:      cfg.WriteTimeout,
 		IdleTimeout:       cfg.IdleTimeout,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+		BaseContext:       func(net.Listener) context.Context { return baseCtx },
 	}
 }
 
-func serve(ctx context.Context, stopSignals context.CancelFunc, srv *http.Server, shutdownTimeout time.Duration, logger *slog.Logger) error {
+func serve(ctx context.Context, stopSignals context.CancelFunc, srv *http.Server, lc *lifecycle, cfg config.Config, logger *slog.Logger) error {
 	serveErr := make(chan error, 1)
 	go func() {
 		logger.Info("http server listening", slog.String("addr", srv.Addr))
@@ -169,11 +187,24 @@ func serve(ctx context.Context, stopSignals context.CancelFunc, srv *http.Server
 	case <-ctx.Done():
 	}
 	stopSignals()
+	return shutdown(srv, lc, cfg.ShutdownDrain, cfg.ShutdownTimeout, logger)
+}
 
-	logger.Info("shutting down", slog.Duration("timeout", shutdownTimeout))
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+func shutdown(srv *http.Server, lc *lifecycle, drain, timeout time.Duration, logger *slog.Logger) error {
+	lc.draining.Store(true)
+	logger.Info("draining before shutdown", slog.Duration("delay", drain))
+	time.Sleep(drain)
+
+	logger.Info("shutting down", slog.Duration("timeout", timeout))
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	err := srv.Shutdown(shutdownCtx)
+	lc.cancelBase()
+	if err != nil {
+		logger.Warn("graceful shutdown timed out, cancelling in-flight requests", slog.Any("error", err))
+		if closeErr := srv.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	logger.Info("server stopped")

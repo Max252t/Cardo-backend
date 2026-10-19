@@ -59,19 +59,21 @@ type Deps struct {
 	Users          UserService
 	Boards         BoardService
 	Readiness      map[string]Checker
+	ShuttingDown   func() bool
 	Clock          Clock
 	TrustedProxies []string
 	MaxBodyBytes   int64
 }
 
 type handlers struct {
-	logger    *slog.Logger
-	auth      AuthService
-	tokens    TokenVerifier
-	users     UserService
-	boards    BoardService
-	readiness map[string]Checker
-	clock     Clock
+	logger       *slog.Logger
+	auth         AuthService
+	tokens       TokenVerifier
+	users        UserService
+	boards       BoardService
+	readiness    map[string]Checker
+	shuttingDown func() bool
+	clock        Clock
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -82,13 +84,14 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	}
 	d = withDefaults(d)
 	h := &handlers{
-		logger:    d.Logger,
-		auth:      d.Auth,
-		tokens:    d.Tokens,
-		users:     d.Users,
-		boards:    d.Boards,
-		readiness: d.Readiness,
-		clock:     d.Clock,
+		logger:       d.Logger,
+		auth:         d.Auth,
+		tokens:       d.Tokens,
+		users:        d.Users,
+		boards:       d.Boards,
+		readiness:    d.Readiness,
+		shuttingDown: d.ShuttingDown,
+		clock:        d.Clock,
 	}
 
 	r := gin.New()
