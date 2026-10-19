@@ -52,12 +52,6 @@ type Clock interface {
 	Now() time.Time
 }
 
-type systemClock struct{}
-
-func (systemClock) Now() time.Time {
-	return time.Now()
-}
-
 type Deps struct {
 	Logger         *slog.Logger
 	Auth           AuthService
@@ -122,7 +116,7 @@ func withDefaults(d Deps) Deps {
 		d.MaxBodyBytes = defaultMaxBodyBytes
 	}
 	if d.Clock == nil {
-		d.Clock = systemClock{}
+		d.Clock = auth.SystemClock{}
 	}
 	return d
 }
