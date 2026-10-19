@@ -4,13 +4,14 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
 const userColumns = "id, email, password_hash, display_name, avatar_color, created_at"
 
-func scanUser(row interface{ Scan(dest ...any) error }) (domain.User, error) {
+func scanUser(row pgx.Row) (domain.User, error) {
 	var u domain.User
 	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.AvatarColor, &u.CreatedAt)
 	return u, err
@@ -34,12 +35,12 @@ func (s *Store) CreateUser(ctx context.Context, u domain.User) (domain.User, err
 
 func (s *Store) GetUserByID(ctx context.Context, id uuid.UUID) (domain.User, error) {
 	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id = $1`, id))
-	return u, notFound(err)
+	return u, noRowsAsNotFound(err)
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
 	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE email = $1`, email))
-	return u, notFound(err)
+	return u, noRowsAsNotFound(err)
 }
 
 func (s *Store) UpdateUserProfile(ctx context.Context, id uuid.UUID, upd domain.ProfileUpdate) (domain.User, error) {
@@ -50,5 +51,5 @@ func (s *Store) UpdateUserProfile(ctx context.Context, id uuid.UUID, upd domain.
 		 WHERE id = $1
 		 RETURNING `+userColumns,
 		id, upd.DisplayName, upd.AvatarColor))
-	return u, notFound(err)
+	return u, noRowsAsNotFound(err)
 }

@@ -65,7 +65,7 @@ func isUniqueViolation(err error, constraint string) bool {
 	return constraint == "" || pgErr.ConstraintName == constraint
 }
 
-func notFound(err error) error {
+func noRowsAsNotFound(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.ErrNotFound
 	}

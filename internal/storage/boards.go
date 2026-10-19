@@ -87,7 +87,7 @@ func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn BoardTx
 			`SELECT `+boardColumns+` FROM boards b WHERE b.id = $1 AND b.deleted_at IS NULL FOR UPDATE`,
 			boardID))
 		if err != nil {
-			return notFound(err)
+			return noRowsAsNotFound(err)
 		}
 		return fn(ctx, &BoardTx{tx: tx, board: board})
 	})
@@ -107,7 +107,7 @@ func (b *BoardTx) MemberRole(ctx context.Context, userID uuid.UUID) (domain.Role
 		`SELECT role FROM board_members WHERE board_id = $1 AND user_id = $2`,
 		b.board.ID, userID).Scan(&role)
 	if err != nil {
-		return "", notFound(err)
+		return "", noRowsAsNotFound(err)
 	}
 	return domain.Role(role), nil
 }

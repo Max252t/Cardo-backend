@@ -27,6 +27,30 @@ func insertRefreshToken(ctx context.Context, q Querier, t domain.RefreshToken) (
 		t.ID, t.UserID, t.FamilyID, t.TokenHash, t.ExpiresAt))
 }
 
+func lockRefreshTokenByHash(ctx context.Context, q Querier, tokenHash string) (domain.RefreshToken, error) {
+	t, err := scanRefreshToken(q.QueryRow(ctx,
+		`SELECT `+refreshColumns+` FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`,
+		tokenHash))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.RefreshToken{}, domain.ErrTokenInvalid
+	}
+	return t, err
+}
+
+func revokeRefreshTokenByID(ctx context.Context, q Querier, id uuid.UUID, now time.Time) error {
+	_, err := q.Exec(ctx,
+		`UPDATE refresh_tokens SET revoked_at = $2 WHERE id = $1`,
+		id, now)
+	return err
+}
+
+func revokeRefreshFamily(ctx context.Context, q Querier, familyID uuid.UUID, now time.Time) error {
+	_, err := q.Exec(ctx,
+		`UPDATE refresh_tokens SET revoked_at = $2 WHERE family_id = $1 AND revoked_at IS NULL`,
+		familyID, now)
+	return err
+}
+
 func (s *Store) CreateRefreshToken(ctx context.Context, t domain.RefreshToken) (domain.RefreshToken, error) {
 	return insertRefreshToken(ctx, s.pool, t)
 }
@@ -37,28 +61,18 @@ func (s *Store) RotateRefreshToken(ctx context.Context, presentedHash string, ne
 		reused bool
 	)
 	err := s.InTx(ctx, func(tx pgx.Tx) error {
-		current, err := scanRefreshToken(tx.QueryRow(ctx,
-			`SELECT `+refreshColumns+` FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`,
-			presentedHash))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.ErrTokenInvalid
-		}
+		current, err := lockRefreshTokenByHash(ctx, tx, presentedHash)
 		if err != nil {
 			return err
 		}
 		if current.RevokedAt != nil {
 			reused = true
-			_, err := tx.Exec(ctx,
-				`UPDATE refresh_tokens SET revoked_at = $2 WHERE family_id = $1 AND revoked_at IS NULL`,
-				current.FamilyID, now)
-			return err
+			return revokeRefreshFamily(ctx, tx, current.FamilyID, now)
 		}
 		if !now.Before(current.ExpiresAt) {
 			return domain.ErrTokenExpired
 		}
-		if _, err := tx.Exec(ctx,
-			`UPDATE refresh_tokens SET revoked_at = $2 WHERE id = $1`,
-			current.ID, now); err != nil {
+		if err := revokeRefreshTokenByID(ctx, tx, current.ID, now); err != nil {
 			return err
 		}
 		next.UserID = current.UserID
