@@ -2,11 +2,9 @@ package httpapi
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
@@ -85,14 +83,8 @@ func (h *handlers) boardEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	raw, present := c.GetQuery("after_seq")
-	if !present {
-		h.fail(c, domain.NewValidationError("after_seq", "is required"))
-		return
-	}
-	afterSeq, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || afterSeq < 0 {
-		h.fail(c, domain.NewValidationError("after_seq", "must be a non-negative integer"))
+	afterSeq, ok := h.afterSeqFromQuery(c)
+	if !ok {
 		return
 	}
 	page, err := h.boards.Events(c, currentUserID(c), boardID, afterSeq)

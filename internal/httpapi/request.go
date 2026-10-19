@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -48,4 +49,20 @@ func (h *handlers) boardIDFromPath(c *gin.Context) (uuid.UUID, bool) {
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+const afterSeqQuery = "after_seq"
+
+func (h *handlers) afterSeqFromQuery(c *gin.Context) (int64, bool) {
+	raw, present := c.GetQuery(afterSeqQuery)
+	if !present {
+		h.fail(c, domain.NewValidationError(afterSeqQuery, "is required"))
+		return 0, false
+	}
+	afterSeq, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || afterSeq < 0 {
+		h.fail(c, domain.NewValidationError(afterSeqQuery, "must be a non-negative integer"))
+		return 0, false
+	}
+	return afterSeq, true
 }
