@@ -28,6 +28,8 @@ const (
 	CodeInternal         = "internal"
 )
 
+const rateLimitRetryAfter = "60"
+
 type ErrorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -37,43 +39,73 @@ type ErrorResponse struct {
 	Error ErrorBody `json:"error"`
 }
 
+type apiError struct {
+	status     int
+	code       string
+	message    string
+	retryAfter string
+}
+
+var sentinelErrors = []struct {
+	target error
+	apiError
+}{
+	{errBadJSON, apiError{status: http.StatusBadRequest, code: CodeBadRequest, message: "request body must be valid JSON"}},
+	{domain.ErrNotFound, apiError{status: http.StatusNotFound, code: CodeNotFound, message: "resource not found"}},
+	{domain.ErrForbidden, apiError{status: http.StatusForbidden, code: CodeForbidden, message: "insufficient permissions"}},
+	{domain.ErrEmailTaken, apiError{status: http.StatusConflict, code: CodeEmailTaken, message: "email is already registered"}},
+	{domain.ErrInvalidCredential, apiError{status: http.StatusUnauthorized, code: CodeLoginFailed, message: "invalid email or password"}},
+	{domain.ErrRateLimited, apiError{status: http.StatusTooManyRequests, code: CodeRateLimited, message: "too many attempts, try again later", retryAfter: rateLimitRetryAfter}},
+	{domain.ErrTokenExpired, apiError{status: http.StatusUnauthorized, code: CodeTokenExpired, message: "token has expired"}},
+	{domain.ErrTokenReused, apiError{status: http.StatusUnauthorized, code: CodeTokenReused, message: "refresh token was already used, session revoked"}},
+	{domain.ErrTokenInvalid, apiError{status: http.StatusUnauthorized, code: CodeInvalidToken, message: "token is invalid"}},
+}
+
+func mapError(err error) (apiError, bool) {
+	var vErr *domain.ValidationError
+	if errors.As(err, &vErr) {
+		return apiError{status: http.StatusBadRequest, code: CodeValidation, message: vErr.Error()}, true
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return apiError{status: http.StatusRequestEntityTooLarge, code: CodePayloadTooLarge, message: "request body is too large"}, true
+	}
+	for _, s := range sentinelErrors {
+		if errors.Is(err, s.target) {
+			return s.apiError, true
+		}
+	}
+	return apiError{}, false
+}
+
 func abortWithError(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, ErrorResponse{Error: ErrorBody{Code: code, Message: message}})
 }
 
-func (h *handlers) fail(c *gin.Context, err error) {
-	var vErr *domain.ValidationError
-	var tooLarge *http.MaxBytesError
-	switch {
-	case errors.As(err, &vErr):
-		abortWithError(c, http.StatusBadRequest, CodeValidation, vErr.Error())
-	case errors.As(err, &tooLarge):
-		abortWithError(c, http.StatusRequestEntityTooLarge, CodePayloadTooLarge, "request body is too large")
-	case errors.Is(err, errBadJSON):
-		abortWithError(c, http.StatusBadRequest, CodeBadRequest, "request body must be valid JSON")
-	case errors.Is(err, domain.ErrNotFound):
-		abortWithError(c, http.StatusNotFound, CodeNotFound, "resource not found")
-	case errors.Is(err, domain.ErrForbidden):
-		abortWithError(c, http.StatusForbidden, CodeForbidden, "insufficient permissions")
-	case errors.Is(err, domain.ErrEmailTaken):
-		abortWithError(c, http.StatusConflict, CodeEmailTaken, "email is already registered")
-	case errors.Is(err, domain.ErrInvalidCredential):
-		abortWithError(c, http.StatusUnauthorized, CodeLoginFailed, "invalid email or password")
-	case errors.Is(err, domain.ErrRateLimited):
-		c.Header("Retry-After", "60")
-		abortWithError(c, http.StatusTooManyRequests, CodeRateLimited, "too many attempts, try again later")
-	case errors.Is(err, domain.ErrTokenExpired):
-		abortWithError(c, http.StatusUnauthorized, CodeTokenExpired, "token has expired")
-	case errors.Is(err, domain.ErrTokenReused):
-		abortWithError(c, http.StatusUnauthorized, CodeTokenReused, "refresh token was already used, session revoked")
-	case errors.Is(err, domain.ErrTokenInvalid):
-		abortWithError(c, http.StatusUnauthorized, CodeInvalidToken, "token is invalid")
-	default:
-		h.logger.ErrorContext(c.Request.Context(), "request failed",
-			slog.String("request_id", requestID(c)),
-			slog.String("route", c.FullPath()),
-			slog.Any("error", err),
-		)
-		abortWithError(c, http.StatusInternalServerError, CodeInternal, "internal server error")
+func abortWithAPIError(c *gin.Context, e apiError) {
+	if e.retryAfter != "" {
+		c.Header("Retry-After", e.retryAfter)
 	}
+	abortWithError(c, e.status, e.code, e.message)
+}
+
+func (h *handlers) fail(c *gin.Context, err error) {
+	if e, ok := mapError(err); ok {
+		abortWithAPIError(c, e)
+		return
+	}
+	h.logger.ErrorContext(c.Request.Context(), "request failed",
+		slog.String("request_id", requestID(c)),
+		slog.String("route", c.FullPath()),
+		slog.Any("error", err),
+	)
+	abortWithError(c, http.StatusInternalServerError, CodeInternal, "internal server error")
+}
+
+func (h *handlers) failCurrentUser(c *gin.Context, err error) {
+	if errors.Is(err, domain.ErrNotFound) {
+		abortWithError(c, http.StatusUnauthorized, CodeUnauthorized, "user no longer exists")
+		return
+	}
+	h.fail(c, err)
 }

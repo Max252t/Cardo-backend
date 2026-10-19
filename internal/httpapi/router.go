@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -47,6 +48,16 @@ func (f CheckerFunc) Ping(ctx context.Context) error {
 	return f(ctx)
 }
 
+type Clock interface {
+	Now() time.Time
+}
+
+type systemClock struct{}
+
+func (systemClock) Now() time.Time {
+	return time.Now()
+}
+
 type Deps struct {
 	Logger         *slog.Logger
 	Auth           AuthService
@@ -54,6 +65,7 @@ type Deps struct {
 	Users          UserService
 	Boards         BoardService
 	Readiness      map[string]Checker
+	Clock          Clock
 	TrustedProxies []string
 	MaxBodyBytes   int64
 }
@@ -65,6 +77,7 @@ type handlers struct {
 	users     UserService
 	boards    BoardService
 	readiness map[string]Checker
+	clock     Clock
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -73,12 +86,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	if d.Auth == nil || d.Tokens == nil || d.Users == nil || d.Boards == nil {
 		return nil, errors.New("httpapi: auth, tokens, users and boards dependencies are required")
 	}
-	if d.Logger == nil {
-		d.Logger = slog.New(slog.DiscardHandler)
-	}
-	if d.MaxBodyBytes <= 0 {
-		d.MaxBodyBytes = defaultMaxBodyBytes
-	}
+	d = withDefaults(d)
 	h := &handlers{
 		logger:    d.Logger,
 		auth:      d.Auth,
@@ -86,6 +94,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		users:     d.Users,
 		boards:    d.Boards,
 		readiness: d.Readiness,
+		clock:     d.Clock,
 	}
 
 	r := gin.New()
@@ -101,15 +110,32 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	r.NoMethod(func(c *gin.Context) {
 		abortWithError(c, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 	})
+	h.registerRoutes(r)
+	return r, nil
+}
 
+func withDefaults(d Deps) Deps {
+	if d.Logger == nil {
+		d.Logger = slog.New(slog.DiscardHandler)
+	}
+	if d.MaxBodyBytes <= 0 {
+		d.MaxBodyBytes = defaultMaxBodyBytes
+	}
+	if d.Clock == nil {
+		d.Clock = systemClock{}
+	}
+	return d
+}
+
+func (h *handlers) registerRoutes(r *gin.Engine) {
 	r.GET("/healthz", h.healthz)
 	r.GET("/readyz", h.readyz)
 
 	api := r.Group("/api")
-	authGroup := api.Group("/auth")
-	authGroup.POST("/register", h.register)
-	authGroup.POST("/login", h.login)
-	authGroup.POST("/refresh", h.refresh)
+	public := api.Group("/auth")
+	public.POST("/register", h.register)
+	public.POST("/login", h.login)
+	public.POST("/refresh", h.refresh)
 
 	user := api.Group("", h.authMiddleware())
 	user.POST("/auth/logout", h.logout)
@@ -117,8 +143,6 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	user.PATCH("/me", h.patchMe)
 	user.GET("/boards", h.listBoards)
 	user.POST("/boards", h.createBoard)
-	user.PATCH("/boards/:id", h.renameBoard)
-	user.DELETE("/boards/:id", h.deleteBoard)
-
-	return r, nil
+	user.PATCH("/boards/:"+boardIDParam, h.renameBoard)
+	user.DELETE("/boards/:"+boardIDParam, h.deleteBoard)
 }

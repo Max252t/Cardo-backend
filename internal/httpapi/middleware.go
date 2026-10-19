@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	ctxRequestID = "request_id"
-	ctxUserID    = "user_id"
-	headerReqID  = "X-Request-ID"
+	ctxRequestID  = "request_id"
+	ctxUserID     = "user_id"
+	headerReqID   = "X-Request-ID"
+	authChallenge = `Bearer realm="cardo"`
 )
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
@@ -109,13 +110,13 @@ func (h *handlers) authMiddleware() gin.HandlerFunc {
 		scheme, token, found := strings.Cut(header, " ")
 		token = strings.TrimSpace(token)
 		if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
-			c.Header("WWW-Authenticate", `Bearer realm="cardo"`)
+			c.Header("WWW-Authenticate", authChallenge)
 			abortWithError(c, http.StatusUnauthorized, CodeUnauthorized, "missing bearer token")
 			return
 		}
 		userID, err := h.tokens.Verify(token)
 		if err != nil {
-			c.Header("WWW-Authenticate", `Bearer realm="cardo", error="invalid_token"`)
+			c.Header("WWW-Authenticate", authChallenge+`, error="invalid_token"`)
 			h.fail(c, err)
 			return
 		}
@@ -133,7 +134,7 @@ func userIDFrom(c *gin.Context) (uuid.UUID, bool) {
 	return id, ok
 }
 
-func mustUserID(c *gin.Context) uuid.UUID {
+func currentUserID(c *gin.Context) uuid.UUID {
 	id, _ := userIDFrom(c)
 	return id
 }
