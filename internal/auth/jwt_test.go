@@ -102,7 +102,8 @@ func TestJWTExpiry(t *testing.T) {
 	}{
 		{"fresh", 0, nil},
 		{"one second before expiry", jwtTTL - time.Second, nil},
-		{"one second after expiry", jwtTTL + time.Second, domain.ErrTokenExpired},
+		{"within clock skew leeway after expiry", jwtTTL + auth.ClockSkewLeeway - time.Second, nil},
+		{"one second after leeway", jwtTTL + auth.ClockSkewLeeway + time.Second, domain.ErrTokenExpired},
 		{"long after expiry", 24 * time.Hour, domain.ErrTokenExpired},
 	}
 	for _, tt := range tests {
@@ -233,4 +234,17 @@ func flipFirst(s string) string {
 		repl = 'B'
 	}
 	return string(repl) + s[1:]
+}
+
+func TestJWTToleratesClockSkewBetweenInstances(t *testing.T) {
+	t.Parallel()
+	issuerClock := newFakeClock()
+	issuerClock.Advance(20 * time.Second)
+	userID := uuid.New()
+	token, _, err := newJWT(issuerClock).Issue(userID)
+	require.NoError(t, err)
+
+	got, err := newJWT(newFakeClock()).Verify(token)
+	require.NoError(t, err)
+	assert.Equal(t, userID, got)
 }

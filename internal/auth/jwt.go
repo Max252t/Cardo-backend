@@ -16,6 +16,8 @@ type AccessTokens interface {
 	Verify(token string) (uuid.UUID, error)
 }
 
+const ClockSkewLeeway = 30 * time.Second
+
 type JWTConfig struct {
 	Secret   []byte
 	Issuer   string
@@ -63,6 +65,7 @@ func (m *JWTManager) Verify(token string) (uuid.UUID, error) {
 		jwt.WithAudience(m.cfg.Audience),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
+		jwt.WithLeeway(ClockSkewLeeway),
 		jwt.WithTimeFunc(m.clock.Now),
 	)
 	if err != nil {
