@@ -12,6 +12,11 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
+const (
+	maxLoginPasswordBytes = 4 * domain.MaxPasswordLength
+	dummyPassword         = "cardo-dummy-password"
+)
+
 type Store interface {
 	CreateUser(ctx context.Context, u domain.User) (domain.User, error)
 	GetUserByEmail(ctx context.Context, email string) (domain.User, error)
@@ -87,41 +92,58 @@ type LoginInput struct {
 }
 
 func (s *Service) Register(ctx context.Context, in RegisterInput) (Session, error) {
-	email, err := domain.NormalizeEmail(in.Email)
+	user, err := s.newUser(in)
 	if err != nil {
 		return Session{}, err
 	}
-	if err := domain.ValidatePassword(in.Password); err != nil {
+	created, err := s.store.CreateUser(ctx, user)
+	if err != nil {
 		return Session{}, err
+	}
+	return s.startSession(ctx, created)
+}
+
+func (s *Service) newUser(in RegisterInput) (domain.User, error) {
+	email, err := domain.NormalizeEmail(in.Email)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := domain.ValidatePassword(in.Password); err != nil {
+		return domain.User{}, err
 	}
 	name, err := domain.NormalizeDisplayName(in.DisplayName)
 	if err != nil {
-		return Session{}, err
+		return domain.User{}, err
 	}
-	color := domain.DefaultAvatarColor(email)
-	if in.AvatarColor != "" {
-		if color, err = domain.NormalizeAvatarColor(in.AvatarColor); err != nil {
-			return Session{}, err
-		}
+	color, err := avatarColorFor(email, in.AvatarColor)
+	if err != nil {
+		return domain.User{}, err
 	}
 	hash, err := s.hasher.Hash(in.Password)
 	if err != nil {
-		return Session{}, err
+		return domain.User{}, err
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
-		return Session{}, err
+		return domain.User{}, err
 	}
-	user, err := s.store.CreateUser(ctx, domain.User{
+	return domain.User{
 		ID:           id,
 		Email:        email,
 		PasswordHash: hash,
 		DisplayName:  name,
 		AvatarColor:  color,
-	})
-	if err != nil {
-		return Session{}, err
+	}, nil
+}
+
+func avatarColorFor(email, requested string) (string, error) {
+	if requested == "" {
+		return domain.DefaultAvatarColor(email), nil
 	}
+	return domain.NormalizeAvatarColor(requested)
+}
+
+func (s *Service) startSession(ctx context.Context, user domain.User) (Session, error) {
 	tokens, err := s.issueNewFamily(ctx, user.ID)
 	if err != nil {
 		return Session{}, err
@@ -152,16 +174,12 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	if err := s.limiter.Reset(ctx, key); err != nil {
 		return Session{}, err
 	}
-	tokens, err := s.issueNewFamily(ctx, user.ID)
-	if err != nil {
-		return Session{}, err
-	}
-	return Session{User: user, Tokens: tokens}, nil
+	return s.startSession(ctx, user)
 }
 
 func (s *Service) authenticate(ctx context.Context, rawEmail, password string) (domain.User, bool, error) {
 	email, err := domain.NormalizeEmail(rawEmail)
-	if err != nil || password == "" || len(password) > 4*domain.MaxPasswordLength {
+	if err != nil || password == "" || len(password) > maxLoginPasswordBytes {
 		s.burnHash(password)
 		return domain.User{}, false, nil
 	}
@@ -182,7 +200,7 @@ func (s *Service) authenticate(ctx context.Context, rawEmail, password string) (
 
 func (s *Service) burnHash(password string) {
 	s.dummyOnce.Do(func() {
-		s.dummyHash, _ = s.hasher.Hash("cardo-dummy-password")
+		s.dummyHash, _ = s.hasher.Hash(dummyPassword)
 	})
 	if s.dummyHash != "" {
 		_, _ = s.hasher.Verify(password, s.dummyHash)
