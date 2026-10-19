@@ -18,7 +18,7 @@ Several users move and edit cards on the same board simultaneously and see each 
 
 | Layer | Technology |
 |-------|------------|
-| Language | Go 1.24+ |
+| Language | Go 1.26+ |
 | HTTP | Gin |
 | WebSocket | gorilla/websocket |
 | Database | PostgreSQL 15+ (pgx) |
@@ -78,7 +78,7 @@ deploy/           nginx and infrastructure configs
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.26+
 - Docker and Docker Compose
 
 ### Run with Docker Compose
@@ -95,6 +95,24 @@ The stack starts two API instances behind nginx, plus PostgreSQL and Redis. Migr
 ```bash
 go run ./cmd/api
 ```
+
+### Configuration
+
+All settings come from environment variables; see `.env.example` for the full list and defaults. Notable ones:
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `DATABASE_URL` | — | Required. |
+| `REDIS_URL` | — | Required unless `LOGIN_LIMITER=memory`. When set, `/readyz` also checks Redis. |
+| `LOGIN_LIMITER` | `redis` | `memory` is a development-only opt-in: the counter is per instance, so limits are not shared between API replicas. |
+| `JWT_SECRET` | — | Required, at least 32 bytes. |
+| `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs of the reverse proxy (the nginx container network, e.g. `172.16.0.0/12`). Must be set behind nginx, otherwise every request appears to come from the proxy and the per-IP login limit is shared by all clients. Leave empty when the API is exposed directly. |
+| `DB_MAX_CONNS` | `20` | At least 2: migrations hold one connection for the advisory lock and need another. |
+| `DB_STATEMENT_TIMEOUT` | `30s` | Pool-wide `statement_timeout`. |
+| `DB_LOCK_TIMEOUT` | `5s` | `lock_timeout` for board row locks; on timeout the API answers `503 busy`. |
+| `ARGON2_MAX_CONCURRENT` | `0` (GOMAXPROCS) | Maximum concurrent password hashes; excess requests wait up to `ARGON2_ACQUIRE_TIMEOUT` and then get `503 overloaded`. |
+| `SHUTDOWN_DRAIN_DELAY` | `3s` | After SIGTERM `/readyz` returns 503 for this long before the server stops accepting connections. |
+| `SHUTDOWN_TIMEOUT` | `20s` | Time to wait for in-flight requests; afterwards their contexts are cancelled and connections closed. |
 
 ### Tests
 
