@@ -1,0 +1,44 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+*.coverprofile
+/reports/tmp/
+
+# Go workspace
+go.work
+go.work.sum
+/vendor/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+tmp/
+
+# Claude Code local state
+.claude/settings.local.json
