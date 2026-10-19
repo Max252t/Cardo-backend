@@ -116,7 +116,7 @@ func TestMigrateReleasesAdvisoryLock(t *testing.T) {
 
 	var held int
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'`).Scan(&held))
+		`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&held))
 	assert.Zero(t, held, "no advisory locks must outlive Migrate")
 }
 
