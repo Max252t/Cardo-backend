@@ -268,3 +268,29 @@ func TestRefreshTokensCascadeOnUserDeletion(t *testing.T) {
 	total, _ := familyState(t, pool, family)
 	assert.Zero(t, total)
 }
+
+func TestRefreshTokenRevokeWithRotatedTokenRevokesCurrent(t *testing.T) {
+	pool := testutil.NewMigratedPool(t)
+	store := storage.New(pool)
+	ctx := context.Background()
+	alice := testutil.CreateUser(t, store, testutil.UniqueEmail("alice-old"))
+	now := time.Now()
+	family, otherFamily := uuid.New(), uuid.New()
+
+	_, err := store.CreateRefreshToken(ctx, newToken(t, alice.ID, family, "old-1", now.Add(time.Hour)))
+	require.NoError(t, err)
+	_, err = store.CreateRefreshToken(ctx, newToken(t, alice.ID, otherFamily, "other-device", now.Add(time.Hour)))
+	require.NoError(t, err)
+	_, err = store.RotateRefreshToken(ctx, auth.HashToken("old-1"), newToken(t, uuid.Nil, uuid.Nil, "current-2", now.Add(time.Hour)), now)
+	require.NoError(t, err)
+
+	revoked, err := store.RevokeRefreshToken(ctx, alice.ID, auth.HashToken("old-1"), now)
+	require.NoError(t, err)
+	assert.True(t, revoked)
+
+	total, revokedCount := familyState(t, pool, family)
+	assert.Equal(t, 2, total)
+	assert.Equal(t, 2, revokedCount, "the family's current token must be revoked too")
+	_, otherRevoked := familyState(t, pool, otherFamily)
+	assert.Zero(t, otherRevoked, "other sessions are unaffected")
+}

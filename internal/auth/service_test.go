@@ -542,3 +542,20 @@ func (overloadedHasher) Hash(context.Context, string) (string, error) {
 func (overloadedHasher) Verify(context.Context, string, string) (bool, error) {
 	return false, domain.ErrOverloaded
 }
+
+func TestLogoutWithRotatedTokenRevokesCurrentSession(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	reg := f.register(t, "alice@example.com", "password1")
+	other, err := login(f, "alice@example.com", "password1")
+	require.NoError(t, err)
+	rotated, err := f.svc.Refresh(context.Background(), reg.Tokens.RefreshToken)
+	require.NoError(t, err)
+
+	require.NoError(t, f.svc.Logout(context.Background(), reg.User.ID, reg.Tokens.RefreshToken))
+
+	current, _ := f.store.token(rotated.RefreshToken)
+	assert.NotNil(t, current.RevokedAt, "the family's current token must be revoked")
+	untouched, _ := f.store.token(other.Tokens.RefreshToken)
+	assert.Nil(t, untouched.RevokedAt, "other sessions stay active")
+}

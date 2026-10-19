@@ -156,13 +156,19 @@ func (s *fakeStore) RevokeRefreshToken(_ context.Context, userID uuid.UUID, toke
 	if s.revokeErr != nil {
 		return false, s.revokeErr
 	}
-	t, ok := s.tokens[tokenHash]
-	if !ok || t.UserID != userID || t.RevokedAt != nil {
+	presented, ok := s.tokens[tokenHash]
+	if !ok || presented.UserID != userID {
 		return false, nil
 	}
-	t.RevokedAt = &now
-	s.tokens[tokenHash] = t
-	return true, nil
+	revoked := false
+	for h, t := range s.tokens {
+		if t.FamilyID == presented.FamilyID && t.RevokedAt == nil {
+			t.RevokedAt = &now
+			s.tokens[h] = t
+			revoked = true
+		}
+	}
+	return revoked, nil
 }
 
 func (s *fakeStore) token(raw string) (domain.RefreshToken, bool) {

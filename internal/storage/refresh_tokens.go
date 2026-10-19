@@ -92,7 +92,8 @@ func (s *Store) RotateRefreshToken(ctx context.Context, presentedHash string, ne
 func (s *Store) RevokeRefreshToken(ctx context.Context, userID uuid.UUID, tokenHash string, now time.Time) (bool, error) {
 	tag, err := s.pool.Exec(ctx,
 		`UPDATE refresh_tokens SET revoked_at = $3
-		 WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL`,
+		 WHERE revoked_at IS NULL
+		   AND family_id = (SELECT family_id FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2)`,
 		tokenHash, userID, now)
 	if err != nil {
 		return false, err
