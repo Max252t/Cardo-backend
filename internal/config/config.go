@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -58,7 +59,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		MaxBodyBytes:       int64(p.integer("HTTP_MAX_BODY_BYTES", 1<<20)),
 		TrustedProxies:     p.list("TRUSTED_PROXIES"),
 		DatabaseURL:        p.str("DATABASE_URL", ""),
-		DBMaxConns:         int32(p.integer("DB_MAX_CONNS", 20)),
+		DBMaxConns:         p.int32("DB_MAX_CONNS", 20),
 		MigrateOnStart:     p.boolean("MIGRATE_ON_START", true),
 		RedisURL:           p.str("REDIS_URL", ""),
 		JWTSecret:          []byte(p.str("JWT_SECRET", "")),
@@ -159,6 +160,19 @@ func (p *parser) integer(key string, def int) int {
 		return def
 	}
 	return int(n)
+}
+
+func (p *parser) int32(key string, def int32) int32 {
+	v, ok := p.raw(key)
+	if !ok {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil || n < math.MinInt32 || n > math.MaxInt32 {
+		p.errs = append(p.errs, fmt.Errorf("%s: invalid integer %q", key, v))
+		return def
+	}
+	return int32(n)
 }
 
 func (p *parser) boolean(key string, def bool) bool {

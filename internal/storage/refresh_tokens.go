@@ -11,7 +11,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
-const refreshTokenColumns = "id, user_id, family_id, token_hash, expires_at, revoked_at, created_at"
+const refreshColumns = "id, user_id, family_id, token_hash, expires_at, revoked_at, created_at"
 
 func scanRefreshToken(row pgx.Row) (domain.RefreshToken, error) {
 	var t domain.RefreshToken
@@ -23,7 +23,7 @@ func insertRefreshToken(ctx context.Context, q Querier, t domain.RefreshToken) (
 	return scanRefreshToken(q.QueryRow(ctx,
 		`INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, expires_at)
 		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING `+refreshTokenColumns,
+		 RETURNING `+refreshColumns,
 		t.ID, t.UserID, t.FamilyID, t.TokenHash, t.ExpiresAt))
 }
 
@@ -38,7 +38,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, presentedHash string, ne
 	)
 	err := s.InTx(ctx, func(tx pgx.Tx) error {
 		current, err := scanRefreshToken(tx.QueryRow(ctx,
-			`SELECT `+refreshTokenColumns+` FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`,
+			`SELECT `+refreshColumns+` FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`,
 			presentedHash))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrTokenInvalid
