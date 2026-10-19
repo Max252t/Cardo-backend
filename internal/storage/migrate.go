@@ -24,6 +24,15 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger) (err 
 	}
 	defer conn.Release()
 
+	if _, err = conn.Exec(ctx, "SET statement_timeout = 0"); err != nil {
+		return fmt.Errorf("disable statement timeout for migration lock: %w", err)
+	}
+	defer func() {
+		if _, resetErr := conn.Exec(context.WithoutCancel(ctx), "RESET statement_timeout"); resetErr != nil {
+			err = errors.Join(err, fmt.Errorf("reset statement timeout: %w", resetErr))
+		}
+	}()
+
 	if _, err = conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockKey); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}

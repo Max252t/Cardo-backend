@@ -46,7 +46,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	store := storage.New(pool)
+	store := storage.New(pool, storage.WithLockTimeout(cfg.DBLockTimeout))
 	readiness := map[string]httpapi.Checker{"postgres": store}
 
 	rdb, err := openRedis(cfg.RedisURL)
@@ -96,7 +96,7 @@ func run() error {
 }
 
 func openDatabase(ctx context.Context, cfg config.Config, logger *slog.Logger) (*pgxpool.Pool, error) {
-	pool, err := storage.NewPool(ctx, cfg.DatabaseURL, cfg.DBMaxConns)
+	pool, err := storage.NewPool(ctx, cfg.DatabaseURL, cfg.DBMaxConns, storage.WithStatementTimeout(cfg.DBStatementTimeout))
 	if err != nil {
 		return nil, err
 	}

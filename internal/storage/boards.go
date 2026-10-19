@@ -82,7 +82,10 @@ type BoardTx struct {
 }
 
 func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn BoardTxFunc) error {
-	return s.InTx(ctx, func(tx pgx.Tx) error {
+	err := s.InTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, durationMillis(s.lockTimeout)); err != nil {
+			return fmt.Errorf("set lock timeout: %w", err)
+		}
 		board, err := scanBoard(tx.QueryRow(ctx,
 			`SELECT `+boardColumns+` FROM boards b WHERE b.id = $1 AND b.deleted_at IS NULL FOR UPDATE`,
 			boardID))
@@ -91,6 +94,7 @@ func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn BoardTx
 		}
 		return fn(ctx, &BoardTx{tx: tx, board: board})
 	})
+	return lockTimeoutAsBusy(err)
 }
 
 func (b *BoardTx) Tx() pgx.Tx {
