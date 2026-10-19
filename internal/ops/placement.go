@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -90,4 +91,24 @@ func rebalance(current, others []storage.RankedItem, self uuid.UUID, pos int) (p
 		}
 	}
 	return p, nil
+}
+
+type rankScope struct {
+	load   func(context.Context) ([]storage.RankedItem, error)
+	rerank func(context.Context, []storage.RankedItem) error
+}
+
+func placeIn(ctx context.Context, scope rankScope, self uuid.UUID, after, before *uuid.UUID) (placement, error) {
+	current, err := scope.load(ctx)
+	if err != nil {
+		return placement{}, err
+	}
+	pl, err := place(current, self, after, before)
+	if err != nil {
+		return placement{}, err
+	}
+	if err := scope.rerank(ctx, pl.rerank); err != nil {
+		return placement{}, err
+	}
+	return pl, nil
 }
