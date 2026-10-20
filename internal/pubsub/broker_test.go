@@ -35,20 +35,6 @@ func assertSilent(t *testing.T, b pubsub.Broker) {
 	}
 }
 
-func TestChannels(t *testing.T) {
-	t.Parallel()
-	id := uuid.New()
-	kind, got := pubsub.ParseChannel(pubsub.BoardChannel(id))
-	assert.Equal(t, pubsub.ChannelBoard, kind)
-	assert.Equal(t, id, got)
-	kind, got = pubsub.ParseChannel(pubsub.PresenceChannel(id))
-	assert.Equal(t, pubsub.ChannelPresence, kind)
-	assert.Equal(t, id, got)
-	for _, bad := range []string{"", "board:", "board:x", "other:" + id.String()} {
-		kind, _ = pubsub.ParseChannel(bad)
-		assert.Equal(t, pubsub.ChannelUnknown, kind, bad)
-	}
-}
 
 func TestMemoryBrokersShareANetwork(t *testing.T) {
 	t.Parallel()
@@ -91,7 +77,7 @@ func TestEventPublisherSendsEnvelopesToBoardChannel(t *testing.T) {
 	net := pubsub.NewMemoryNetwork()
 	sender, listener := net.NewBroker(), net.NewBroker()
 	boardID := uuid.New()
-	require.NoError(t, listener.Subscribe(ctx, pubsub.BoardChannel(boardID)))
+	require.NoError(t, listener.Subscribe(ctx, protocol.BoardChannel(boardID)))
 
 	opID := uuid.New()
 	events := []domain.Event{
@@ -111,4 +97,27 @@ func TestEventPublisherSendsEnvelopesToBoardChannel(t *testing.T) {
 
 	require.NoError(t, sender.Close())
 	assert.Error(t, pubsub.NewEventPublisher(sender).Publish(ctx, events))
+}
+
+func TestPumpDeliversUntilBrokerClosed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	b := pubsub.NewMemoryNetwork().NewBroker()
+	require.NoError(t, b.Subscribe(ctx, "board:x"))
+	require.NoError(t, b.Publish(ctx, "board:x", []byte("one")))
+	require.NoError(t, b.Publish(ctx, "board:x", []byte("two")))
+	got := make(chan string, 4)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		pubsub.Pump(b, func(channel string, payload []byte) { got <- channel + "=" + string(payload) })
+	}()
+	assert.Equal(t, "board:x=one", <-got)
+	assert.Equal(t, "board:x=two", <-got)
+	require.NoError(t, b.Close())
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pump did not stop")
+	}
 }

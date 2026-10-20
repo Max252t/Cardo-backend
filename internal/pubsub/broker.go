@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
-
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -24,40 +22,6 @@ type Broker interface {
 	Close() error
 }
 
-const (
-	boardChannelPrefix    = "board:"
-	presenceChannelPrefix = "presence:"
-)
-
-func BoardChannel(boardID uuid.UUID) string {
-	return boardChannelPrefix + boardID.String()
-}
-
-func PresenceChannel(boardID uuid.UUID) string {
-	return presenceChannelPrefix + boardID.String()
-}
-
-type ChannelKind int
-
-const (
-	ChannelUnknown ChannelKind = iota
-	ChannelBoard
-	ChannelPresence
-)
-
-func ParseChannel(channel string) (ChannelKind, uuid.UUID) {
-	for kind, prefix := range map[ChannelKind]string{ChannelBoard: boardChannelPrefix, ChannelPresence: presenceChannelPrefix} {
-		if len(channel) > len(prefix) && channel[:len(prefix)] == prefix {
-			id, err := uuid.Parse(channel[len(prefix):])
-			if err != nil {
-				return ChannelUnknown, uuid.Nil
-			}
-			return kind, id
-		}
-	}
-	return ChannelUnknown, uuid.Nil
-}
-
 type EventPublisher struct {
 	broker Broker
 }
@@ -72,9 +36,15 @@ func (p *EventPublisher) Publish(ctx context.Context, events []domain.Event) err
 		if err != nil {
 			return fmt.Errorf("marshal event %d: %w", ev.Seq, err)
 		}
-		if err := p.broker.Publish(ctx, BoardChannel(ev.BoardID), data); err != nil {
+		if err := p.broker.Publish(ctx, protocol.BoardChannel(ev.BoardID), data); err != nil {
 			return fmt.Errorf("publish event %d: %w", ev.Seq, err)
 		}
 	}
 	return nil
+}
+
+func Pump(broker Broker, handle func(channel string, payload []byte)) {
+	for m := range broker.Messages() {
+		handle(m.Channel, m.Payload)
+	}
 }
