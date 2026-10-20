@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -41,11 +42,27 @@ func (h *handlers) bindJSON(c *gin.Context, dst any) bool {
 	return true
 }
 
-func (h *handlers) uuidParam(c *gin.Context, name string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(c.Param(name))
+func (h *handlers) boardIDFromPath(c *gin.Context) (uuid.UUID, bool) {
+	id, err := uuid.Parse(c.Param(boardIDParam))
 	if err != nil {
-		h.fail(c, domain.NewValidationError(name, "must be a UUID"))
+		h.fail(c, domain.NewValidationError(boardIDParam, "must be a UUID"))
 		return uuid.Nil, false
 	}
 	return id, true
+}
+
+const afterSeqQuery = "after_seq"
+
+func (h *handlers) afterSeqFromQuery(c *gin.Context) (int64, bool) {
+	raw, present := c.GetQuery(afterSeqQuery)
+	if !present {
+		h.fail(c, domain.NewValidationError(afterSeqQuery, "is required"))
+		return 0, false
+	}
+	afterSeq, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || afterSeq < 0 {
+		h.fail(c, domain.NewValidationError(afterSeqQuery, "must be a non-negative integer"))
+		return 0, false
+	}
+	return afterSeq, true
 }

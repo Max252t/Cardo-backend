@@ -30,6 +30,7 @@ const (
 	CodeOverloaded       = "overloaded"
 	CodeBusy             = "busy"
 	CodeShuttingDown     = "shutting_down"
+	CodeGone             = "gone"
 	CodeInternal         = "internal"
 )
 
@@ -65,6 +66,7 @@ var sentinelErrors = []struct {
 	{domain.ErrInvalidCredential, apiError{status: http.StatusUnauthorized, code: CodeLoginFailed, message: "invalid email or password"}},
 	{domain.ErrRateLimited, apiError{status: http.StatusTooManyRequests, code: CodeRateLimited, message: "too many attempts, try again later", retryAfter: defaultRateLimitRetryAfter}},
 	{domain.ErrOverloaded, apiError{status: http.StatusServiceUnavailable, code: CodeOverloaded, message: "server is overloaded, try again later", retryAfter: unavailableRetryAfter}},
+	{domain.ErrGone, apiError{status: http.StatusGone, code: CodeGone, message: "requested events are no longer retained, load a snapshot"}},
 	{domain.ErrBusy, apiError{status: http.StatusServiceUnavailable, code: CodeBusy, message: "resource is busy, try again later", retryAfter: unavailableRetryAfter}},
 	{domain.ErrTokenExpired, apiError{status: http.StatusUnauthorized, code: CodeTokenExpired, message: "token has expired"}},
 	{domain.ErrTokenReused, apiError{status: http.StatusUnauthorized, code: CodeTokenReused, message: "refresh token was already used, session revoked"}},

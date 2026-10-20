@@ -2,6 +2,7 @@ package boards_test
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 )
@@ -172,7 +174,7 @@ func TestRenameBoardByOwner(t *testing.T) {
 	assert.Equal(t, b.ID, ev.BoardID)
 	assert.Equal(t, int64(1), ev.Seq)
 	assert.Equal(t, domain.EventBoardRenamed, ev.Type)
-	assert.JSONEq(t, `{"title":"New title"}`, string(ev.Payload))
+	assert.JSONEq(t, `{"title":"New title","actor_id":"`+owner.ID.String()+`"}`, string(ev.Payload))
 	require.NotNil(t, ev.ActorID)
 	assert.Equal(t, owner.ID, *ev.ActorID)
 
@@ -184,8 +186,8 @@ func TestRenameBoardByOwner(t *testing.T) {
 	evs := e.events(t, b.ID)
 	require.Len(t, evs, 2)
 	assert.Equal(t, domain.EventBoardRenamed, evs[0].typ)
-	assert.JSONEq(t, `{"title":"New title"}`, evs[0].payload)
-	assert.JSONEq(t, `{"title":"Third"}`, evs[1].payload)
+	assert.JSONEq(t, `{"title":"New title","actor_id":"`+owner.ID.String()+`"}`, evs[0].payload)
+	assert.JSONEq(t, `{"title":"Third","actor_id":"`+owner.ID.String()+`"}`, evs[1].payload)
 	require.NotNil(t, evs[1].actor)
 	assert.Equal(t, owner.ID, *evs[1].actor)
 
@@ -270,7 +272,7 @@ func TestDeleteBoardIsSoft(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), ev.Seq)
 	assert.Equal(t, domain.EventBoardDeleted, ev.Type)
-	assert.JSONEq(t, `{}`, string(ev.Payload))
+	assert.JSONEq(t, `{"actor_id":"`+owner.ID.String()+`"}`, string(ev.Payload))
 	require.NotNil(t, ev.ActorID)
 	assert.Equal(t, owner.ID, *ev.ActorID)
 
@@ -338,7 +340,7 @@ func TestConcurrentRenamesProduceGapFreeSeq(t *testing.T) {
 	assert.Equal(t, int64(workers), row.seq)
 	assert.Equal(t, workers, row.eventsCnt)
 
-	assert.JSONEq(t, `{"title":"`+row.title+`"}`, evs[workers-1].payload, "final title must come from the event with the highest seq")
+	assert.JSONEq(t, `{"title":"`+row.title+`","actor_id":"`+owner.ID.String()+`"}`, evs[workers-1].payload, "final title must come from the event with the highest seq")
 }
 
 func TestConcurrentRenamesAcrossBoardsAreIndependent(t *testing.T) {
@@ -425,4 +427,76 @@ func TestConcurrentRenameAndDelete(t *testing.T) {
 	row := e.row(t, b.ID)
 	assert.True(t, row.deleted)
 	assert.Equal(t, int64(succeeded+1), row.seq)
+}
+
+func TestRenameAndDeletePublishAfterCommit(t *testing.T) {
+	pool := testutil.NewMigratedPool(t)
+	store := storage.New(pool)
+	var (
+		mu        sync.Mutex
+		published []domain.Event
+	)
+	svc := boards.NewService(store, boards.WithPublisher(pubsub.PublisherFunc(func(ctx context.Context, events []domain.Event) error {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, ev := range events {
+			var seq int64
+			require.NoError(t, pool.QueryRow(ctx, `SELECT seq FROM boards WHERE id = $1`, ev.BoardID).Scan(&seq))
+			assert.GreaterOrEqual(t, seq, ev.Seq, "event must be committed before it is published")
+		}
+		published = append(published, events...)
+		return errors.New("redis down")
+	})))
+	ctx := context.Background()
+	owner := testutil.CreateUser(t, store, testutil.UniqueEmail("pub"))
+	b, err := svc.Create(ctx, owner.ID, "Pub")
+	require.NoError(t, err)
+
+	_, _, err = svc.Rename(ctx, owner.ID, b.ID, "Renamed")
+	require.NoError(t, err, "publish failures do not fail the committed rename")
+	_, _, err = svc.Rename(ctx, uuid.New(), b.ID, "Nope")
+	require.Error(t, err)
+	_, err = svc.Delete(ctx, owner.ID, b.ID)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, published, 2)
+	assert.Equal(t, domain.EventBoardRenamed, published[0].Type)
+	assert.Equal(t, domain.EventBoardDeleted, published[1].Type)
+}
+
+func TestSnapshotAndEventsRequireMembership(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	owner := e.user(t, "owner")
+	viewer := e.user(t, "viewer")
+	outsider := e.user(t, "outsider")
+	b, err := e.svc.Create(ctx, owner.ID, "Snap")
+	require.NoError(t, err)
+	e.addMember(t, b.ID, viewer.ID, domain.RoleViewer)
+	_, _, err = e.svc.Rename(ctx, owner.ID, b.ID, "Snap 2")
+	require.NoError(t, err)
+
+	snap, err := e.svc.Snapshot(ctx, viewer.ID, b.ID)
+	require.NoError(t, err)
+	assert.Equal(t, domain.RoleViewer, snap.Board.Role)
+	assert.Equal(t, "Snap 2", snap.Board.Title)
+	assert.Equal(t, int64(1), snap.Seq)
+	assert.Len(t, snap.Members, 2)
+	assert.Empty(t, snap.Columns)
+	assert.Empty(t, snap.Cards)
+
+	page, err := e.svc.Events(ctx, viewer.ID, b.ID, 0)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 1)
+	assert.Equal(t, domain.EventBoardRenamed, page.Events[0].Type)
+
+	_, err = e.svc.Events(ctx, viewer.ID, b.ID, -1)
+	var vErr *domain.ValidationError
+	assert.ErrorAs(t, err, &vErr)
+	_, err = e.svc.Snapshot(ctx, outsider.ID, b.ID)
+	assert.ErrorIs(t, err, domain.ErrNotFound)
+	_, err = e.svc.Events(ctx, outsider.ID, b.ID, 0)
+	assert.ErrorIs(t, err, domain.ErrNotFound)
 }

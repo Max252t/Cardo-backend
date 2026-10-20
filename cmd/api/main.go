@@ -21,6 +21,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
+	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/users"
 )
@@ -88,7 +89,7 @@ func run() error {
 		Auth:           authService,
 		Tokens:         jwtManager,
 		Users:          users.NewService(store),
-		Boards:         boards.NewService(store),
+		Boards:         boards.NewService(store, boards.WithPublisher(pubsub.Nop{}), boards.WithLogger(logger)),
 		Readiness:      readiness,
 		ShuttingDown:   lc.draining.Load,
 		TrustedProxies: cfg.TrustedProxies,

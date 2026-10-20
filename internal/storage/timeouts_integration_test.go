@@ -83,3 +83,23 @@ func TestPoolStatementTimeout(t *testing.T) {
 	_, err = pool.Exec(context.Background(), `SELECT 1 FROM users LIMIT 1`)
 	assert.NoError(t, err)
 }
+
+func TestMigrateIgnoresPoolStatementTimeoutAndReleasesConnections(t *testing.T) {
+	dsn := testutil.NewDatabase(t)
+	pool, err := storage.NewPool(context.Background(), dsn, 4, storage.WithStatementTimeout(5*time.Millisecond))
+	require.NoError(t, err)
+
+	require.NoError(t, storage.Migrate(context.Background(), pool, discardLogger))
+	assert.Zero(t, pool.Stat().AcquiredConns(), "migration must not keep pool connections checked out")
+
+	closed := make(chan struct{})
+	go func() {
+		pool.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("pool.Close hung after Migrate")
+	}
+}

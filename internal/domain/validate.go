@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"net/mail"
 	"regexp"
 	"strings"
@@ -107,6 +108,44 @@ func checkText(field, s string) error {
 		if unicode.IsControl(r) {
 			return NewValidationError(field, "must not contain control characters")
 		}
+	}
+	return nil
+}
+
+func NormalizeCardTitle(raw string) (string, error) {
+	return normalizeTitle("title", raw, MaxCardTitleLength)
+}
+
+func NormalizeColumnTitle(raw string) (string, error) {
+	return normalizeTitle("title", raw, MaxColumnTitleLength)
+}
+
+func normalizeTitle(field, raw string, maxLen int) (string, error) {
+	title := strings.TrimSpace(raw)
+	if err := checkText(field, title); err != nil {
+		return "", err
+	}
+	n := utf8.RuneCountInString(title)
+	if n == 0 {
+		return "", NewValidationError(field, "is required")
+	}
+	if n > maxLen {
+		return "", NewValidationError(field, fmt.Sprintf("must be at most %d characters", maxLen))
+	}
+	return title, nil
+}
+
+func ValidateDescription(desc string) error {
+	if !utf8.ValidString(desc) {
+		return NewValidationError("description", "must be valid UTF-8")
+	}
+	for _, r := range desc {
+		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' {
+			return NewValidationError("description", "must not contain control characters")
+		}
+	}
+	if utf8.RuneCountInString(desc) > MaxDescriptionLength {
+		return NewValidationError("description", fmt.Sprintf("must be at most %d characters", MaxDescriptionLength))
 	}
 	return nil
 }

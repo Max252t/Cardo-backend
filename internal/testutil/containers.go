@@ -25,6 +25,11 @@ import (
 )
 
 const (
+	ExternalPostgresEnv = "TEST_DATABASE_URL"
+	ExternalRedisEnv    = "TEST_REDIS_URL"
+)
+
+const (
 	postgresImage = "postgres:16-alpine"
 	redisImage    = "redis:7-alpine"
 	startTimeout  = 3 * time.Minute
@@ -134,16 +139,28 @@ func (s *shared) start(fn func(context.Context) (testcontainers.Container, strin
 	})
 }
 
-func NewDatabase(t *testing.T) string {
+func postgresAdminDSN(t *testing.T) string {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test skipped in short mode")
+	}
+	if dsn := os.Getenv(ExternalPostgresEnv); dsn != "" {
+		return dsn
+	}
 	requireDocker(t)
 	pgContainer.start(startPostgres)
 	if pgContainer.err != nil {
 		t.Fatalf("postgres container: %v", pgContainer.err)
 	}
+	return pgContainer.dsn
+}
+
+func NewDatabase(t *testing.T) string {
+	t.Helper()
+	adminDSN := postgresAdminDSN(t)
 
 	ctx := context.Background()
-	admin, err := pgx.Connect(ctx, pgContainer.dsn)
+	admin, err := pgx.Connect(ctx, adminDSN)
 	if err != nil {
 		t.Fatalf("connect to postgres admin database: %v", err)
 	}
@@ -154,7 +171,7 @@ func NewDatabase(t *testing.T) string {
 		t.Fatalf("create test database: %v", err)
 	}
 	t.Cleanup(func() {
-		conn, err := pgx.Connect(context.Background(), pgContainer.dsn)
+		conn, err := pgx.Connect(context.Background(), adminDSN)
 		if err != nil {
 			return
 		}
@@ -162,7 +179,7 @@ func NewDatabase(t *testing.T) string {
 		_, _ = conn.Exec(context.Background(), "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)")
 	})
 
-	u, err := url.Parse(pgContainer.dsn)
+	u, err := url.Parse(adminDSN)
 	if err != nil {
 		t.Fatalf("parse postgres dsn: %v", err)
 	}
@@ -195,14 +212,25 @@ func NewStore(t *testing.T) *storage.Store {
 	return storage.New(NewMigratedPool(t))
 }
 
-func NewRedis(t *testing.T) *redis.Client {
+func redisURL(t *testing.T) string {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("integration test skipped in short mode")
+	}
+	if u := os.Getenv(ExternalRedisEnv); u != "" {
+		return u
+	}
 	requireDocker(t)
 	redisContainer.start(startRedis)
 	if redisContainer.err != nil {
 		t.Fatalf("redis container: %v", redisContainer.err)
 	}
-	opts, err := redis.ParseURL(redisContainer.dsn)
+	return redisContainer.dsn
+}
+
+func NewRedis(t *testing.T) *redis.Client {
+	t.Helper()
+	opts, err := redis.ParseURL(redisURL(t))
 	if err != nil {
 		t.Fatalf("parse redis url: %v", err)
 	}

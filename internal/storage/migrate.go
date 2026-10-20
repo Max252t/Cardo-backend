@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -50,7 +51,7 @@ func runMigrations(pool *pgxpool.Pool, logger *slog.Logger) (err error) {
 	if err != nil {
 		return fmt.Errorf("open migration source: %w", err)
 	}
-	db := stdlib.OpenDBFromPool(pool)
+	db := migrationDB(pool)
 	driver, err := migratepgx.WithInstance(db, &migratepgx.Config{})
 	if err != nil {
 		_ = db.Close()
@@ -77,4 +78,13 @@ func runMigrations(pool *pgxpool.Pool, logger *slog.Logger) (err error) {
 	}
 	logger.Info("migrations applied", slog.Uint64("version", uint64(version)), slog.Bool("dirty", dirty))
 	return nil
+}
+
+func migrationDB(pool *pgxpool.Pool) *sql.DB {
+	cfg := pool.Config().ConnConfig.Copy()
+	delete(cfg.RuntimeParams, "statement_timeout")
+	db := stdlib.OpenDB(*cfg)
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(0)
+	return db
 }

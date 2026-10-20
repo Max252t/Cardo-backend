@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 const boardIDParam = "id"
@@ -35,7 +37,7 @@ func (h *handlers) createBoard(c *gin.Context) {
 }
 
 func (h *handlers) renameBoard(c *gin.Context) {
-	boardID, ok := h.uuidParam(c, boardIDParam)
+	boardID, ok := h.boardIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -52,7 +54,7 @@ func (h *handlers) renameBoard(c *gin.Context) {
 }
 
 func (h *handlers) deleteBoard(c *gin.Context) {
-	boardID, ok := h.uuidParam(c, boardIDParam)
+	boardID, ok := h.boardIDFromPath(c)
 	if !ok {
 		return
 	}
@@ -61,4 +63,34 @@ func (h *handlers) deleteBoard(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func (h *handlers) getBoard(c *gin.Context) {
+	boardID, ok := h.boardIDFromPath(c)
+	if !ok {
+		return
+	}
+	snap, err := h.boards.Snapshot(c, currentUserID(c), boardID)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, protocol.FromSnapshot(snap))
+}
+
+func (h *handlers) boardEvents(c *gin.Context) {
+	boardID, ok := h.boardIDFromPath(c)
+	if !ok {
+		return
+	}
+	afterSeq, ok := h.afterSeqFromQuery(c)
+	if !ok {
+		return
+	}
+	page, err := h.boards.Events(c, currentUserID(c), boardID, afterSeq)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, protocol.FromEventPage(page))
 }

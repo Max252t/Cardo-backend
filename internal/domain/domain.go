@@ -19,6 +19,7 @@ var (
 	ErrTokenReused       = errors.New("refresh token reused")
 	ErrOverloaded        = errors.New("server overloaded")
 	ErrBusy              = errors.New("resource busy")
+	ErrGone              = errors.New("gone")
 )
 
 type RateLimitError struct {
@@ -130,4 +131,57 @@ type Event struct {
 	OpID      *uuid.UUID
 	ActorID   *uuid.UUID
 	CreatedAt time.Time
+}
+
+const (
+	MaxCardTitleLength   = 500
+	MaxDescriptionLength = 10000
+	MaxColumnTitleLength = 200
+)
+
+type Column struct {
+	ID         uuid.UUID
+	BoardID    uuid.UUID
+	Title      string
+	Rank       string
+	Version    int64
+	ArchivedAt *time.Time
+}
+
+type Card struct {
+	ID                 uuid.UUID
+	BoardID            uuid.UUID
+	ColumnID           uuid.UUID
+	Title              string
+	Description        string
+	Rank               string
+	Version            int64
+	DescriptionVersion int64
+	CreatedBy          uuid.UUID
+	UpdatedBy          uuid.UUID
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	ArchivedAt         *time.Time
+}
+
+type Member struct {
+	UserID      uuid.UUID
+	DisplayName string
+	AvatarColor string
+	Role        Role
+	JoinedAt    time.Time
+}
+
+type BoardSnapshot struct {
+	Board   BoardWithRole
+	Columns []Column
+	Cards   []Card
+	Members []Member
+	Seq     int64
+}
+
+type EventPage struct {
+	Events  []Event
+	Seq     int64
+	HasMore bool
 }
