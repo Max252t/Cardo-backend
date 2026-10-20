@@ -161,20 +161,28 @@ func (h *Hub) clientsWhere(boardID uuid.UUID, match func(*Client) bool) []*Clien
 	return out
 }
 
+func anyClient(*Client) bool {
+	return true
+}
+
+func ofUser(userID uuid.UUID) func(*Client) bool {
+	return func(c *Client) bool { return c.member.UserID == userID }
+}
+
 func (h *Hub) CloseBoard(boardID uuid.UUID, code int, reason string) {
-	for _, c := range h.clientsWhere(boardID, func(*Client) bool { return true }) {
+	for _, c := range h.clientsWhere(boardID, anyClient) {
 		c.closeWith(code, reason)
 	}
 }
 
 func (h *Hub) CloseUser(boardID, userID uuid.UUID, code int, reason string) {
-	for _, c := range h.clientsWhere(boardID, func(c *Client) bool { return c.member.UserID == userID }) {
+	for _, c := range h.clientsWhere(boardID, ofUser(userID)) {
 		c.closeWith(code, reason)
 	}
 }
 
 func (h *Hub) SetRole(boardID, userID uuid.UUID, role domain.Role) {
-	for _, c := range h.clientsWhere(boardID, func(c *Client) bool { return c.member.UserID == userID }) {
+	for _, c := range h.clientsWhere(boardID, ofUser(userID)) {
 		c.setRole(role)
 	}
 }
@@ -196,7 +204,7 @@ func (h *Hub) join(c *Client) error {
 		return err
 	}
 	if first {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(h.baseCtx), h.cfg.BusTimeout)
+		ctx, cancel := h.busContext()
 		defer cancel()
 		if err := h.presence.Join(ctx, c.boardID, c.profile); err != nil {
 			h.logger.Warn("presence join failed", c.logAttrs(slog.Any("error", err))...)
@@ -214,7 +222,7 @@ func (h *Hub) register(c *Client) (bool, error) {
 		return false, ErrShuttingDown
 	}
 	if r == nil {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(h.baseCtx), h.cfg.BusTimeout)
+		ctx, cancel := h.busContext()
 		defer cancel()
 		if err := h.bus.Subscribe(ctx, protocol.BoardChannel(c.boardID), protocol.PresenceChannel(c.boardID)); err != nil {
 			return false, fmt.Errorf("subscribe board channels: %w", err)
@@ -244,7 +252,7 @@ func (h *Hub) leave(c *Client) {
 	h.subMu.Lock()
 	lastConn, empty := h.unregister(c)
 	if empty {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(h.baseCtx), h.cfg.BusTimeout)
+		ctx, cancel := h.busContext()
 		if err := h.bus.Unsubscribe(ctx, protocol.BoardChannel(c.boardID), protocol.PresenceChannel(c.boardID)); err != nil {
 			h.logger.Warn("unsubscribe board channels failed", c.logAttrs(slog.Any("error", err))...)
 		}
@@ -252,7 +260,7 @@ func (h *Hub) leave(c *Client) {
 	}
 	h.subMu.Unlock()
 	if lastConn {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(h.baseCtx), h.cfg.BusTimeout)
+		ctx, cancel := h.busContext()
 		defer cancel()
 		if err := h.presence.Leave(ctx, c.boardID, c.member.UserID); err != nil {
 			h.logger.Warn("presence leave failed", c.logAttrs(slog.Any("error", err))...)
@@ -299,17 +307,7 @@ func (h *Hub) Run(ctx context.Context) {
 }
 
 func (h *Hub) heartbeat(ctx context.Context) {
-	h.mu.RLock()
-	snapshot := make(map[uuid.UUID][]protocol.PresenceUser, len(h.rooms))
-	for boardID, r := range h.rooms {
-		users := make([]protocol.PresenceUser, 0, len(r.users))
-		for _, u := range r.users {
-			users = append(users, u.profile)
-		}
-		snapshot[boardID] = users
-	}
-	h.mu.RUnlock()
-	for boardID, users := range snapshot {
+	for boardID, users := range h.onlineByBoard() {
 		opCtx, cancel := context.WithTimeout(ctx, h.cfg.BusTimeout)
 		if err := h.presence.Touch(opCtx, boardID, users); err != nil {
 			h.logger.Warn("presence heartbeat failed", slog.String("board_id", boardID.String()), slog.Any("error", err))
@@ -322,16 +320,7 @@ func (h *Hub) heartbeat(ctx context.Context) {
 }
 
 func (h *Hub) Shutdown(ctx context.Context) error {
-	h.mu.Lock()
-	h.closing = true
-	var all []*Client
-	for _, r := range h.rooms {
-		for c := range r.clients {
-			all = append(all, c)
-		}
-	}
-	h.mu.Unlock()
-	for _, c := range all {
+	for _, c := range h.stopAccepting() {
 		c.closeWith(protocol.CloseGoingAway, "server shutting down")
 	}
 	done := make(chan struct{})
@@ -356,18 +345,52 @@ func (h *Hub) dispatchPresence(boardID uuid.UUID, payload []byte) {
 		h.logger.Warn("dropping malformed presence message", slog.String("board_id", boardID.String()), slog.Any("error", err))
 		return
 	}
-	var subject uuid.UUID
+	h.broadcast(boardID, 0, payload, presenceSubject(env))
+}
+
+func (h *Hub) busContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(h.baseCtx), h.cfg.BusTimeout)
+}
+
+func (h *Hub) onlineByBoard() map[uuid.UUID][]protocol.PresenceUser {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	online := make(map[uuid.UUID][]protocol.PresenceUser, len(h.rooms))
+	for boardID, r := range h.rooms {
+		users := make([]protocol.PresenceUser, 0, len(r.users))
+		for _, u := range r.users {
+			users = append(users, u.profile)
+		}
+		online[boardID] = users
+	}
+	return online
+}
+
+func (h *Hub) stopAccepting() []*Client {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closing = true
+	var all []*Client
+	for _, r := range h.rooms {
+		for c := range r.clients {
+			all = append(all, c)
+		}
+	}
+	return all
+}
+
+func presenceSubject(env protocol.Envelope) uuid.UUID {
 	switch env.Type {
 	case protocol.TypePresenceJoin:
 		var join protocol.PresenceJoin
 		if err := json.Unmarshal(env.Payload, &join); err == nil {
-			subject = join.User.ID
+			return join.User.ID
 		}
 	case protocol.TypePresenceLeave:
 		var leave protocol.PresenceLeave
 		if err := json.Unmarshal(env.Payload, &leave); err == nil {
-			subject = leave.UserID
+			return leave.UserID
 		}
 	}
-	h.broadcast(boardID, 0, payload, subject)
+	return uuid.Nil
 }

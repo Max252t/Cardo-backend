@@ -52,9 +52,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, boardID uuid.UUID, m
 	}
 	c := newClient(h, conn, boardID, member, tokenExpiresAt)
 	if err := h.join(c); err != nil {
-		_ = conn.WriteControl(websocket.CloseMessage,
-			websocket.FormatCloseMessage(closeCodeFor(err), "unavailable"),
-			time.Now().Add(h.cfg.WriteWait))
+		writeCloseFrame(conn, closeCodeFor(err), "unavailable", h.cfg.WriteWait)
 		c.cancel()
 		_ = conn.Close()
 		return err

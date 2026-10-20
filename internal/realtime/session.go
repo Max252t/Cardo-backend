@@ -13,6 +13,8 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
+const msgRoleForbidsChanges = "your role does not allow changing this board"
+
 func (c *Client) handle(data []byte) {
 	env, err := protocol.ParseEnvelope(data)
 	if err != nil {
@@ -71,12 +73,7 @@ func (c *Client) sendNack(opID uuid.UUID, nack protocol.Nack) {
 		c.hub.logger.Error("encode nack failed", c.logAttrs(slog.Any("error", err))...)
 		return
 	}
-	data, err := json.Marshal(env)
-	if err != nil {
-		c.hub.logger.Error("marshal nack failed", c.logAttrs(slog.Any("error", err))...)
-		return
-	}
-	c.enqueue(data)
+	c.enqueueJSON("marshal nack failed", env)
 }
 
 func (c *Client) localNack(opID uuid.UUID, reason, message string) {
@@ -168,7 +165,7 @@ func (c *Client) onOp(env protocol.Envelope) {
 		return
 	}
 	if !c.Role().AtLeast(domain.RoleEditor) {
-		c.localNack(op.OpID, protocol.ReasonForbidden, "your role does not allow changing this board")
+		c.localNack(op.OpID, protocol.ReasonForbidden, msgRoleForbidsChanges)
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, c.hub.cfg.OpTimeout)
@@ -185,7 +182,7 @@ func (c *Client) finishOp(op protocol.Op, out protocol.OpOutcome, err error) {
 	case errors.Is(err, domain.ErrNotFound):
 		c.closeWith(protocol.CloseBoardDeleted, "board not found")
 	case errors.Is(err, domain.ErrForbidden):
-		c.localNack(op.OpID, protocol.ReasonForbidden, "your role does not allow changing this board")
+		c.localNack(op.OpID, protocol.ReasonForbidden, msgRoleForbidsChanges)
 	default:
 		var vErr *domain.ValidationError
 		if errors.As(err, &vErr) {
@@ -205,12 +202,7 @@ func (c *Client) deliverOutcome(op protocol.Op, out protocol.OpOutcome) {
 	case out.Nack != nil:
 		c.sendNack(op.OpID, *out.Nack)
 	case out.Replayed && out.Event != nil:
-		data, err := json.Marshal(protocol.EventEnvelope(*out.Event))
-		if err != nil {
-			c.hub.logger.Error("marshal replayed event failed", c.logAttrs(slog.Any("error", err))...)
-			return
-		}
-		c.enqueue(data)
+		c.enqueueJSON("marshal replayed event failed", protocol.EventEnvelope(*out.Event))
 	}
 }
 
@@ -239,4 +231,13 @@ func (c *Client) failHandshake(err error) {
 		c.sendError(protocol.ReasonInternal, "synchronization failed, reconnect")
 		c.closeWith(websocket.CloseInternalServerErr, "sync failed")
 	}
+}
+
+func (c *Client) enqueueJSON(failureMsg string, v any) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		c.hub.logger.Error(failureMsg, c.logAttrs(slog.Any("error", err))...)
+		return
+	}
+	c.enqueue(data)
 }

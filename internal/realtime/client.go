@@ -202,10 +202,7 @@ func (c *Client) closeNow(code int, reason string) {
 }
 
 func (c *Client) forceClose(code int, reason string) {
-	c.hub.logger.Debug("closing websocket", c.logAttrs(slog.Int("code", code))...)
-	_ = c.conn.WriteControl(websocket.CloseMessage,
-		websocket.FormatCloseMessage(code, protocol.CloseReason(reason)),
-		time.Now().Add(c.hub.cfg.WriteWait))
+	c.sendCloseFrame(code, reason)
 	c.cancel()
 	_ = c.conn.Close()
 }
@@ -248,10 +245,7 @@ func (c *Client) write(messageType int, data []byte) error {
 }
 
 func (c *Client) writeClose(item outbound) {
-	c.hub.logger.Debug("closing websocket", c.logAttrs(slog.Int("code", item.closeCode))...)
-	_ = c.conn.WriteControl(websocket.CloseMessage,
-		websocket.FormatCloseMessage(item.closeCode, protocol.CloseReason(item.closeReason)),
-		time.Now().Add(c.hub.cfg.WriteWait))
+	c.sendCloseFrame(item.closeCode, item.closeReason)
 	grace := c.hub.clock.NewTimer(c.hub.cfg.CloseGrace)
 	defer grace.Stop()
 	select {
@@ -332,4 +326,15 @@ func (c *Client) setExpiry(expiresAt time.Time) {
 func (c *Client) closeOnCancel() {
 	<-c.ctx.Done()
 	_ = c.conn.Close()
+}
+
+func (c *Client) sendCloseFrame(code int, reason string) {
+	c.hub.logger.Debug("closing websocket", c.logAttrs(slog.Int("code", code))...)
+	writeCloseFrame(c.conn, code, reason, c.hub.cfg.WriteWait)
+}
+
+func writeCloseFrame(conn *websocket.Conn, code int, reason string, wait time.Duration) {
+	_ = conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(code, protocol.CloseReason(reason)),
+		time.Now().Add(wait))
 }
