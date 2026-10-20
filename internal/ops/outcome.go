@@ -7,9 +7,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 const (
@@ -39,7 +39,7 @@ func (s storedOutcome) nack() protocol.Nack {
 	return protocol.Nack{Reason: s.Reason, AtSeq: s.AtSeq, Message: s.Message}
 }
 
-func saveOutcome(ctx context.Context, btx *storage.BoardTx, opID, userID uuid.UUID, outcome storedOutcome) (bool, error) {
+func saveOutcome(ctx context.Context, btx boardtx.Tx, opID, userID uuid.UUID, outcome storedOutcome) (bool, error) {
 	saved, err := btx.SaveProcessedOp(ctx, opID, userID, outcome)
 	if err != nil {
 		return false, fmt.Errorf("save processed op: %w", err)
@@ -47,7 +47,7 @@ func saveOutcome(ctx context.Context, btx *storage.BoardTx, opID, userID uuid.UU
 	return saved, nil
 }
 
-func replay(ctx context.Context, btx *storage.BoardTx, prev domain.ProcessedOp, userID uuid.UUID) (Outcome, error) {
+func replay(ctx context.Context, btx boardtx.Tx, prev domain.ProcessedOp, userID uuid.UUID) (Outcome, error) {
 	if prev.BoardID != btx.Board().ID || prev.UserID != userID {
 		return transientNack(btx, opIDTaken()), nil
 	}
@@ -72,6 +72,6 @@ func replay(ctx context.Context, btx *storage.BoardTx, prev domain.ProcessedOp, 
 	return Outcome{}, fmt.Errorf("unknown processed op outcome kind %q", stored.Kind)
 }
 
-func transientNack(btx *storage.BoardTx, rej *rejection) Outcome {
+func transientNack(btx boardtx.Tx, rej *rejection) Outcome {
 	return Outcome{Nack: &protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}}
 }

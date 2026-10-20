@@ -8,14 +8,14 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 type Store interface {
-	WithBoardLock(ctx context.Context, boardID uuid.UUID, fn storage.BoardTxFunc) error
+	WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx.Func) error
 }
 
 type Outcome struct {
@@ -75,7 +75,7 @@ func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op pro
 		return Outcome{}, domain.NewValidationError("op_id", "is required")
 	}
 	var out Outcome
-	err := p.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := p.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
 		var err error
 		out, err = applyLocked(ctx, btx, userID, op)
 		return err
@@ -94,7 +94,7 @@ func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op pro
 	return out, nil
 }
 
-func applyLocked(ctx context.Context, btx *storage.BoardTx, userID uuid.UUID, op protocol.Op) (Outcome, error) {
+func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.Op) (Outcome, error) {
 	prev, found, err := btx.ProcessedOp(ctx, op.OpID)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("read processed op: %w", err)
@@ -115,9 +115,9 @@ func applyLocked(ctx context.Context, btx *storage.BoardTx, userID uuid.UUID, op
 	return Outcome{Event: &primary, Extra: res.extra}, nil
 }
 
-func execute(ctx context.Context, btx *storage.BoardTx, userID uuid.UUID, op protocol.Op) (result, error) {
+func execute(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.Op) (result, error) {
 	var res result
-	err := btx.Savepoint(ctx, func(ctx context.Context, sp *storage.BoardTx) error {
+	err := btx.Savepoint(ctx, func(ctx context.Context, sp boardtx.Tx) error {
 		a := &applier{btx: sp, actor: userID, opID: op.OpID}
 		if err := a.authorize(ctx); err != nil {
 			return err
@@ -138,7 +138,7 @@ func execute(ctx context.Context, btx *storage.BoardTx, userID uuid.UUID, op pro
 	return res, err
 }
 
-func rejected(ctx context.Context, btx *storage.BoardTx, opID, userID uuid.UUID, rej *rejection) (Outcome, error) {
+func rejected(ctx context.Context, btx boardtx.Tx, opID, userID uuid.UUID, rej *rejection) (Outcome, error) {
 	if rej.transient {
 		return transientNack(btx, rej), nil
 	}

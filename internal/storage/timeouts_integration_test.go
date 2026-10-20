@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
@@ -30,7 +31,7 @@ func TestWithBoardLockTimesOutAsBusy(t *testing.T) {
 
 	start := time.Now()
 	called := false
-	err = store.WithBoardLock(ctx, b.ID, func(context.Context, *storage.BoardTx) error {
+	err = store.WithBoardLock(ctx, b.ID, func(context.Context, boardtx.Tx) error {
 		called = true
 		return nil
 	})
@@ -39,7 +40,7 @@ func TestWithBoardLockTimesOutAsBusy(t *testing.T) {
 	assert.Less(t, time.Since(start), 5*time.Second)
 
 	require.NoError(t, holder.Rollback(ctx))
-	assert.NoError(t, store.WithBoardLock(ctx, b.ID, func(context.Context, *storage.BoardTx) error { return nil }))
+	assert.NoError(t, store.WithBoardLock(ctx, b.ID, func(context.Context, boardtx.Tx) error { return nil }))
 }
 
 func TestWithBoardLockTimeoutIsTransactionLocal(t *testing.T) {
@@ -49,9 +50,9 @@ func TestWithBoardLockTimeoutIsTransactionLocal(t *testing.T) {
 	b := createBoard(t, store, owner.ID, "Local")
 	ctx := context.Background()
 
-	err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		var v string
-		require.NoError(t, btx.Tx().QueryRow(ctx, `SHOW lock_timeout`).Scan(&v))
+		require.NoError(t, btx.(*storage.BoardTx).Tx().QueryRow(ctx, `SHOW lock_timeout`).Scan(&v))
 		assert.Equal(t, "1500ms", v)
 		return nil
 	})

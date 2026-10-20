@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Max252t/Cardo-backend/internal/boards"
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 type readStore struct {
@@ -28,7 +28,7 @@ func (s *readStore) CreateBoardWithOwner(context.Context, domain.Board) (domain.
 	return domain.BoardWithRole{}, nil
 }
 
-func (s *readStore) WithBoardLock(context.Context, uuid.UUID, storage.BoardTxFunc) error {
+func (s *readStore) WithBoardLock(context.Context, uuid.UUID, boardtx.Func) error {
 	return nil
 }
 

@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 type result struct {
@@ -17,7 +17,7 @@ type result struct {
 }
 
 type applier struct {
-	btx   *storage.BoardTx
+	btx   boardtx.Tx
 	actor uuid.UUID
 	opID  uuid.UUID
 	res   result

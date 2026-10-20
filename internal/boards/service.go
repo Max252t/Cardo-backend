@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 const MaxEventsPerPage = 1000
@@ -17,7 +17,7 @@ const MaxEventsPerPage = 1000
 type Store interface {
 	ListBoardsForUser(ctx context.Context, userID uuid.UUID) ([]domain.BoardWithRole, error)
 	CreateBoardWithOwner(ctx context.Context, b domain.Board) (domain.BoardWithRole, error)
-	WithBoardLock(ctx context.Context, boardID uuid.UUID, fn storage.BoardTxFunc) error
+	WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx.Func) error
 	Snapshot(ctx context.Context, boardID, userID uuid.UUID) (domain.BoardSnapshot, error)
 	EventsAfter(ctx context.Context, boardID, userID uuid.UUID, afterSeq int64, limit int) (domain.EventPage, error)
 }
@@ -90,7 +90,7 @@ func (s *Service) Rename(ctx context.Context, userID, boardID uuid.UUID, title s
 		out domain.BoardWithRole
 		ev  domain.Event
 	)
-	err = s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err = s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
 		role, err := btx.RequireRole(ctx, userID, domain.RoleOwner)
 		if err != nil {
 			return err
@@ -114,7 +114,7 @@ func (s *Service) Rename(ctx context.Context, userID, boardID uuid.UUID, title s
 
 func (s *Service) Delete(ctx context.Context, userID, boardID uuid.UUID) (domain.Event, error) {
 	var ev domain.Event
-	err := s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
 		if _, err := btx.RequireRole(ctx, userID, domain.RoleOwner); err != nil {
 			return err
 		}
@@ -138,7 +138,7 @@ func (s *Service) publish(ctx context.Context, ev domain.Event) {
 	)
 }
 
-func appendUserEvent(ctx context.Context, btx *storage.BoardTx, actorID uuid.UUID, eventType string, payload any) (domain.Event, error) {
+func appendUserEvent(ctx context.Context, btx boardtx.Tx, actorID uuid.UUID, eventType string, payload any) (domain.Event, error) {
 	return btx.AppendEvent(ctx, domain.EventDraft{
 		Type:    eventType,
 		Payload: payload,
