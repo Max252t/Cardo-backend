@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/jwtauth"
@@ -24,7 +25,7 @@ type fixture struct {
 	clock   *fakeClock
 	limiter *ratelimit.MemoryLimiter
 	jwt     *jwtauth.Manager
-	hasher  *auth.Argon2Hasher
+	hasher  *argon2id.Hasher
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -33,7 +34,7 @@ func newFixture(t *testing.T) *fixture {
 	store := newFakeStore()
 	limiter := ratelimit.NewMemoryLimiter(5, time.Minute, clock)
 	jwtm := newJWT(clock)
-	hasher := auth.NewArgon2Hasher(fastArgon2)
+	hasher := argon2id.New(fastArgon2)
 	svc := auth.NewService(auth.Deps{
 		Store:      store,
 		Hasher:     hasher,
@@ -299,7 +300,7 @@ func TestLoginInfrastructureErrors(t *testing.T) {
 	t.Run("limiter reserve", func(t *testing.T) {
 		t.Parallel()
 		f := newFixture(t)
-		svc := auth.NewService(auth.Deps{Store: f.store, Hasher: auth.NewArgon2Hasher(fastArgon2), Access: f.jwt, Limiter: errLimiter{reserveErr: boom}, Clock: f.clock, RefreshTTL: refreshTTL})
+		svc := auth.NewService(auth.Deps{Store: f.store, Hasher: argon2id.New(fastArgon2), Access: f.jwt, Limiter: errLimiter{reserveErr: boom}, Clock: f.clock, RefreshTTL: refreshTTL})
 		_, err := svc.Login(context.Background(), auth.LoginInput{Email: "a@b.co", Password: "password1"})
 		assert.ErrorIs(t, err, boom)
 	})
@@ -308,7 +309,7 @@ func TestLoginInfrastructureErrors(t *testing.T) {
 		t.Parallel()
 		f := newFixture(t)
 		f.register(t, "a@b.co", "password1")
-		svc := auth.NewService(auth.Deps{Store: f.store, Hasher: auth.NewArgon2Hasher(fastArgon2), Access: f.jwt, Limiter: errLimiter{resetErr: boom}, Clock: f.clock, RefreshTTL: refreshTTL})
+		svc := auth.NewService(auth.Deps{Store: f.store, Hasher: argon2id.New(fastArgon2), Access: f.jwt, Limiter: errLimiter{resetErr: boom}, Clock: f.clock, RefreshTTL: refreshTTL})
 		_, err := svc.Login(context.Background(), auth.LoginInput{Email: "a@b.co", Password: "password1"})
 		assert.ErrorIs(t, err, boom)
 	})
@@ -327,7 +328,7 @@ func TestLoginInfrastructureErrors(t *testing.T) {
 		f := newFixture(t)
 		f.store.users["a@b.co"] = domain.User{ID: uuid.New(), Email: "a@b.co", PasswordHash: "garbage"}
 		_, err := login(f, "a@b.co", "password1")
-		assert.ErrorIs(t, err, auth.ErrInvalidHash)
+		assert.ErrorIs(t, err, argon2id.ErrInvalidHash)
 	})
 
 	t.Run("refresh token creation", func(t *testing.T) {
@@ -470,7 +471,7 @@ func TestNewServiceDefaults(t *testing.T) {
 	store := newFakeStore()
 	svc := auth.NewService(auth.Deps{
 		Store:      store,
-		Hasher:     auth.NewArgon2Hasher(fastArgon2),
+		Hasher:     argon2id.New(fastArgon2),
 		Access:     newJWT(nil),
 		Limiter:    ratelimit.NewMemoryLimiter(5, time.Minute, nil),
 		RefreshTTL: time.Hour,

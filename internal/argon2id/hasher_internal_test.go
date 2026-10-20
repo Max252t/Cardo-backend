@@ -1,4 +1,4 @@
-package auth
+package argon2id
 
 import (
 	"context"
@@ -11,26 +11,26 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
-var tinyParams = Argon2Params{Memory: 8, Iterations: 1, Parallelism: 1, SaltLength: 8, KeyLength: 16}
+var tinyParams = Params{Memory: 8, Iterations: 1, Parallelism: 1, SaltLength: 8, KeyLength: 16}
 
 func TestArgon2HasherDefaultSlotsFollowGOMAXPROCS(t *testing.T) {
 	t.Parallel()
-	h := NewArgon2Hasher(tinyParams)
+	h := New(tinyParams)
 	assert.Positive(t, cap(h.slots))
-	assert.Equal(t, DefaultHashAcquireTimeout, h.acquireTimeout)
+	assert.Equal(t, DefaultAcquireTimeout, h.acquireTimeout)
 
-	h = NewArgon2Hasher(tinyParams, WithMaxConcurrent(3), WithAcquireTimeout(time.Second))
+	h = New(tinyParams, WithMaxConcurrent(3), WithAcquireTimeout(time.Second))
 	assert.Equal(t, 3, cap(h.slots))
 	assert.Equal(t, time.Second, h.acquireTimeout)
 
-	h = NewArgon2Hasher(tinyParams, WithMaxConcurrent(0), WithAcquireTimeout(0))
+	h = New(tinyParams, WithMaxConcurrent(0), WithAcquireTimeout(0))
 	assert.Positive(t, cap(h.slots))
-	assert.Equal(t, DefaultHashAcquireTimeout, h.acquireTimeout)
+	assert.Equal(t, DefaultAcquireTimeout, h.acquireTimeout)
 }
 
 func TestArgon2HasherOverloadedWhenSlotsBusy(t *testing.T) {
 	t.Parallel()
-	h := NewArgon2Hasher(tinyParams, WithMaxConcurrent(1), WithAcquireTimeout(20*time.Millisecond))
+	h := New(tinyParams, WithMaxConcurrent(1), WithAcquireTimeout(20*time.Millisecond))
 	encoded, err := h.Hash(context.Background(), "password")
 	require.NoError(t, err)
 
@@ -48,7 +48,7 @@ func TestArgon2HasherOverloadedWhenSlotsBusy(t *testing.T) {
 
 func TestArgon2HasherHonoursContextWhileWaiting(t *testing.T) {
 	t.Parallel()
-	h := NewArgon2Hasher(tinyParams, WithMaxConcurrent(1), WithAcquireTimeout(time.Minute))
+	h := New(tinyParams, WithMaxConcurrent(1), WithAcquireTimeout(time.Minute))
 	h.slots <- struct{}{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -60,7 +60,7 @@ func TestArgon2HasherHonoursContextWhileWaiting(t *testing.T) {
 
 func TestArgon2HasherWaitsForFreeSlot(t *testing.T) {
 	t.Parallel()
-	h := NewArgon2Hasher(tinyParams, WithMaxConcurrent(1), WithAcquireTimeout(5*time.Second))
+	h := New(tinyParams, WithMaxConcurrent(1), WithAcquireTimeout(5*time.Second))
 	h.slots <- struct{}{}
 	go func() {
 		time.Sleep(20 * time.Millisecond)

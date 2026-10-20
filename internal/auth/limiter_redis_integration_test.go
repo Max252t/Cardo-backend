@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
@@ -169,7 +170,7 @@ func TestServiceLoginWithRedisLimiterSixthAttempt(t *testing.T) {
 	f := newFixture(t)
 	svc := auth.NewService(auth.Deps{
 		Store:      f.store,
-		Hasher:     auth.NewArgon2Hasher(fastArgon2),
+		Hasher:     argon2id.New(fastArgon2),
 		Access:     f.jwt,
 		Limiter:    ratelimit.NewRedisLimiter(client, 5, time.Minute),
 		Clock:      f.clock,

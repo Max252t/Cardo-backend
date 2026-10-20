@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
@@ -89,7 +90,7 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 	}, clock)
 	authSvc := auth.NewService(auth.Deps{
 		Store:      store,
-		Hasher:     auth.NewArgon2Hasher(auth.Argon2Params{Memory: 8, Iterations: 1, Parallelism: 1, SaltLength: 8, KeyLength: 16}),
+		Hasher:     argon2id.New(argon2id.Params{Memory: 8, Iterations: 1, Parallelism: 1, SaltLength: 8, KeyLength: 16}),
 		Access:     jwtm,
 		Limiter:    limiter,
 		Clock:      clock,

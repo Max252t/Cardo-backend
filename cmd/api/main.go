@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
@@ -71,9 +72,9 @@ func run() error {
 	}, nil)
 	authService := auth.NewService(auth.Deps{
 		Store: store,
-		Hasher: auth.NewArgon2Hasher(auth.DefaultArgon2Params,
-			auth.WithMaxConcurrent(cfg.HashMaxConcurrent),
-			auth.WithAcquireTimeout(cfg.HashAcquireTimeout),
+		Hasher: argon2id.New(argon2id.DefaultParams,
+			argon2id.WithMaxConcurrent(cfg.HashMaxConcurrent),
+			argon2id.WithAcquireTimeout(cfg.HashAcquireTimeout),
 		),
 		Access:     jwtManager,
 		Limiter:    newLoginLimiter(cfg, rdb, logger),
