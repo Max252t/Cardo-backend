@@ -3,6 +3,7 @@ package presence
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -124,11 +125,7 @@ func (s *Service) Touch(ctx context.Context, boardID uuid.UUID, users []protocol
 	if len(users) == 0 {
 		return nil
 	}
-	members := make([]string, 0, len(users))
-	for _, u := range users {
-		members = append(members, s.member(u.ID))
-	}
-	if err := s.store.Put(ctx, boardID, members, s.clock.Now()); err != nil {
+	if err := s.store.Put(ctx, boardID, s.membersOf(users), s.clock.Now()); err != nil {
 		return fmt.Errorf("touch presence: %w", err)
 	}
 	if err := s.store.SaveProfiles(ctx, boardID, users); err != nil {
@@ -142,23 +139,14 @@ func (s *Service) Online(ctx context.Context, boardID uuid.UUID) ([]protocol.Pre
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]uuid.UUID, 0, len(fresh))
-	for id := range fresh {
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
+	if len(fresh) == 0 {
 		return []protocol.PresenceUser{}, nil
 	}
-	users, err := s.store.Profiles(ctx, boardID, ids)
+	users, err := s.store.Profiles(ctx, boardID, slices.Collect(maps.Keys(fresh)))
 	if err != nil {
 		return nil, fmt.Errorf("load presence profiles: %w", err)
 	}
-	slices.SortFunc(users, func(a, b protocol.PresenceUser) int {
-		if c := strings.Compare(a.Name, b.Name); c != 0 {
-			return c
-		}
-		return strings.Compare(a.ID.String(), b.ID.String())
-	})
+	slices.SortFunc(users, byNameThenID)
 	return users, nil
 }
 
@@ -177,16 +165,8 @@ func (s *Service) Sweep(ctx context.Context, boardID uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	departed := make(map[uuid.UUID]struct{})
-	for _, m := range stale {
-		if id, ok := memberUser(m); ok {
-			if _, alive := remaining[id]; !alive {
-				departed[id] = struct{}{}
-			}
-		}
-	}
 	var firstErr error
-	for id := range departed {
+	for id := range departedUsers(stale, remaining) {
 		if err := s.depart(ctx, boardID, id); err != nil && firstErr == nil {
 			firstErr = err
 		}
@@ -210,4 +190,31 @@ func (s *Service) announce(ctx context.Context, boardID uuid.UUID, msgType strin
 		return fmt.Errorf("publish %s: %w", msgType, err)
 	}
 	return nil
+}
+
+func (s *Service) membersOf(users []protocol.PresenceUser) []string {
+	members := make([]string, 0, len(users))
+	for _, u := range users {
+		members = append(members, s.member(u.ID))
+	}
+	return members
+}
+
+func departedUsers(stale []string, remaining map[uuid.UUID]struct{}) map[uuid.UUID]struct{} {
+	departed := make(map[uuid.UUID]struct{})
+	for _, m := range stale {
+		if id, ok := memberUser(m); ok {
+			if _, alive := remaining[id]; !alive {
+				departed[id] = struct{}{}
+			}
+		}
+	}
+	return departed
+}
+
+func byNameThenID(a, b protocol.PresenceUser) int {
+	if c := strings.Compare(a.Name, b.Name); c != 0 {
+		return c
+	}
+	return strings.Compare(a.ID.String(), b.ID.String())
 }

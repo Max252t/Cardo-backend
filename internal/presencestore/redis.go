@@ -100,11 +100,7 @@ func (r *RedisStore) SaveProfiles(ctx context.Context, boardID uuid.UUID, users 
 }
 
 func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]protocol.PresenceUser, error) {
-	fields := make([]string, 0, len(ids))
-	for _, id := range ids {
-		fields = append(fields, id.String())
-	}
-	raw, err := r.client.HMGet(ctx, profilesKey(boardID), fields...).Result()
+	raw, err := r.client.HMGet(ctx, profilesKey(boardID), idStrings(ids)...).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -124,9 +120,13 @@ func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid
 }
 
 func (r *RedisStore) DeleteProfiles(ctx context.Context, boardID uuid.UUID, ids ...uuid.UUID) error {
-	fields := make([]string, 0, len(ids))
+	return r.client.HDel(ctx, profilesKey(boardID), idStrings(ids)...).Err()
+}
+
+func idStrings(ids []uuid.UUID) []string {
+	out := make([]string, 0, len(ids))
 	for _, id := range ids {
-		fields = append(fields, id.String())
+		out = append(out, id.String())
 	}
-	return r.client.HDel(ctx, profilesKey(boardID), fields...).Err()
+	return out
 }
