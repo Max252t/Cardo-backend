@@ -79,10 +79,15 @@ type unusedBoards struct{ httpapi.BoardService }
 
 func (e *Env) StartInstance(t testing.TB, name string) *Instance {
 	t.Helper()
+	return e.StartInstanceWith(t, name, nil)
+}
+
+func (e *Env) StartInstanceWith(t testing.TB, name string, mutate func(*realtime.Deps), opts ...realtime.HubOption) *Instance {
+	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	broker := e.Network.NewBroker()
 	svc := presence.New(e.Presence, broker, e.Clock, name)
-	hub, err := realtime.NewHub(realtime.Deps{
+	deps := realtime.Deps{
 		Bus:      broker,
 		Presence: svc,
 		Ops:      e.opApplier(),
@@ -90,7 +95,11 @@ func (e *Env) StartInstance(t testing.TB, name string) *Instance {
 		Members:  e.memberLookup(),
 		Tokens:   e.Tokens,
 		Clock:    e.Clock,
-	}, e.Config)
+	}
+	if mutate != nil {
+		mutate(&deps)
+	}
+	hub, err := realtime.NewHub(deps, e.Config, opts...)
 	if err != nil {
 		t.Fatalf("new hub: %v", err)
 	}
