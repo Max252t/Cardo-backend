@@ -662,3 +662,20 @@ func TestOversizedMessageDropsConnection(t *testing.T) {
 	require.Error(t, err)
 	assert.Eventually(t, func() bool { return inst.Hub.ConnectionCount(env.Board.ID) == 0 }, 5*time.Second, 10*time.Millisecond)
 }
+
+func TestSlowClientIsDisconnectedWhenSendBufferOverflows(t *testing.T) {
+	t.Parallel()
+	env := rttest.NewEnv(t)
+	env.Config = realtime.Config{SendBuffer: 2, WriteWait: 200 * time.Millisecond}
+	ann := rttest.AddUser(env, "Ann", domain.RoleEditor)
+	inst := env.StartInstance(t, "a")
+	c := inst.Dial(t, ann)
+	c.HandshakeSnapshot()
+
+	payload := map[string]string{"blob": string(make([]byte, 256<<10))}
+	assert.Eventually(t, func() bool {
+		_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, payload, ann)
+		require.NoError(t, err)
+		return inst.Hub.ConnectionCount(env.Board.ID) == 0
+	}, 20*time.Second, time.Millisecond)
+}
