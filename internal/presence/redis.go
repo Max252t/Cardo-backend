@@ -65,16 +65,20 @@ func (r *RedisStore) Remove(ctx context.Context, boardID uuid.UUID, members ...s
 }
 
 func (r *RedisStore) Fresh(ctx context.Context, boardID uuid.UUID, after time.Time) ([]string, error) {
-	return r.client.ZRangeByScore(ctx, scoreKey(boardID), &redis.ZRangeBy{
-		Min: scoreExclusive + toScore(after),
-		Max: scorePosInf,
+	return r.client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     scoreKey(boardID),
+		ByScore: true,
+		Start:   scoreExclusive + toScore(after),
+		Stop:    scorePosInf,
 	}).Result()
 }
 
 func (r *RedisStore) Stale(ctx context.Context, boardID uuid.UUID, upTo time.Time) ([]string, error) {
-	return r.client.ZRangeByScore(ctx, scoreKey(boardID), &redis.ZRangeBy{
-		Min: scoreNegInf,
-		Max: toScore(upTo),
+	return r.client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     scoreKey(boardID),
+		ByScore: true,
+		Start:   scoreNegInf,
+		Stop:    toScore(upTo),
 	}).Result()
 }
 
