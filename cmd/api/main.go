@@ -18,10 +18,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
-	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
-	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/users"
 )
@@ -80,7 +78,14 @@ func run() error {
 		RefreshTTL: cfg.RefreshTokenTTL,
 	})
 
+	rt, err := newRealtimeStack(cfg, store, rdb, jwtManager, logger)
+	if err != nil {
+		return fmt.Errorf("build realtime: %w", err)
+	}
+	defer rt.stop()
+
 	lc := newLifecycle()
+	lc.closeSockets = rt.hub.Shutdown
 	defer lc.cancelBase()
 
 	gin.SetMode(gin.ReleaseMode)
@@ -89,7 +94,9 @@ func run() error {
 		Auth:           authService,
 		Tokens:         jwtManager,
 		Users:          users.NewService(store),
-		Boards:         boards.NewService(store, boards.WithPublisher(pubsub.Nop{}), boards.WithLogger(logger)),
+		Boards:         rt.boards,
+		Claims:         jwtManager,
+		Sockets:        rt.hub,
 		Readiness:      readiness,
 		ShuttingDown:   lc.draining.Load,
 		TrustedProxies: cfg.TrustedProxies,
@@ -146,9 +153,10 @@ func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) 
 }
 
 type lifecycle struct {
-	draining   atomic.Bool
-	baseCtx    context.Context
-	cancelBase context.CancelFunc
+	draining     atomic.Bool
+	closeSockets func(ctx context.Context) error
+	baseCtx      context.Context
+	cancelBase   context.CancelFunc
 }
 
 func newLifecycle() *lifecycle {
@@ -199,6 +207,11 @@ func shutdown(srv *http.Server, lc *lifecycle, drain, timeout time.Duration, log
 	logger.Info("shutting down", slog.Duration("timeout", timeout))
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	if lc.closeSockets != nil {
+		if drainErr := lc.closeSockets(shutdownCtx); drainErr != nil {
+			logger.Warn("closing websocket connections timed out", slog.Any("error", drainErr))
+		}
+	}
 	err := srv.Shutdown(shutdownCtx)
 	lc.cancelBase()
 	if err != nil {

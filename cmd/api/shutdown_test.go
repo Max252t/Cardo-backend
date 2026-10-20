@@ -100,3 +100,27 @@ func TestShutdownWaitsForInFlightRequests(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, <-done)
 	assert.Error(t, lc.baseCtx.Err(), "base context is cancelled after shutdown")
 }
+
+func TestShutdownClosesSocketsBeforeStoppingServer(t *testing.T) {
+	lc := newLifecycle()
+	srv, _ := startTestServer(t, http.NotFoundHandler(), lc)
+	var order []string
+	lc.closeSockets = func(context.Context) error {
+		order = append(order, "sockets")
+		return nil
+	}
+
+	err := shutdown(srv, lc, 0, time.Second, slog.New(slog.DiscardHandler))
+	require.NoError(t, err)
+	order = append(order, "done")
+	assert.Equal(t, []string{"sockets", "done"}, order)
+	assert.True(t, lc.draining.Load())
+}
+
+func TestShutdownContinuesWhenSocketsFailToClose(t *testing.T) {
+	lc := newLifecycle()
+	srv, _ := startTestServer(t, http.NotFoundHandler(), lc)
+	lc.closeSockets = func(context.Context) error { return errors.New("stuck") }
+
+	require.NoError(t, shutdown(srv, lc, 0, time.Second, slog.New(slog.DiscardHandler)))
+}
