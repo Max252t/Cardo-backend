@@ -22,10 +22,10 @@ func (h *handlers) healthz(c *gin.Context) {
 }
 
 func (h *handlers) readyz(c *gin.Context) {
-	if h.shuttingDown != nil && h.shuttingDown() {
+	if h.isShuttingDown() {
 		c.Header("Retry-After", unavailableRetryAfter)
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, readinessResponse{
-			Error:  &ErrorBody{Code: CodeShuttingDown, Message: "server is shutting down"},
+			Error:  &ErrorBody{Code: CodeShuttingDown, Message: shuttingDownMessage},
 			Checks: map[string]string{},
 		})
 		return
@@ -60,4 +60,10 @@ func (h *handlers) runReadinessChecks(ctx context.Context) (checks map[string]st
 		checks[name] = statusOK
 	}
 	return checks, failed
+}
+
+const shuttingDownMessage = "server is shutting down"
+
+func (h *handlers) isShuttingDown() bool {
+	return h.shuttingDown != nil && h.shuttingDown()
 }

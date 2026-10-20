@@ -21,14 +21,16 @@ type BoardSockets interface {
 	Serve(w http.ResponseWriter, r *http.Request, boardID uuid.UUID, member domain.Member, tokenExpiresAt time.Time) error
 }
 
+var shuttingDownError = apiError{
+	status:     http.StatusServiceUnavailable,
+	code:       CodeShuttingDown,
+	message:    shuttingDownMessage,
+	retryAfter: unavailableRetryAfter,
+}
+
 func (h *handlers) connectBoardSocket(c *gin.Context) {
-	if h.shuttingDown != nil && h.shuttingDown() {
-		abortWithAPIError(c, apiError{
-			status:     http.StatusServiceUnavailable,
-			code:       CodeShuttingDown,
-			message:    "server is shutting down",
-			retryAfter: unavailableRetryAfter,
-		})
+	if h.isShuttingDown() {
+		abortWithAPIError(c, shuttingDownError)
 		return
 	}
 	token, ok := h.bearerToken(c)
