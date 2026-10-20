@@ -38,10 +38,11 @@ func (b *BoardTx) ColumnRanks(ctx context.Context) ([]RankedItem, error) {
 }
 
 func (b *BoardTx) InsertColumn(ctx context.Context, c domain.Column) (domain.Column, error) {
-	return scanColumn(b.tx.QueryRow(ctx,
+	col, err := scanColumn(b.tx.QueryRow(ctx,
 		`INSERT INTO columns (id, board_id, title, rank) VALUES ($1, $2, $3, $4)
 		 RETURNING `+columnColumns,
 		c.ID, b.board.ID, c.Title, c.Rank))
+	return col, duplicateIDError(err)
 }
 
 func (b *BoardTx) RenameColumn(ctx context.Context, id uuid.UUID, title string) (domain.Column, error) {

@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -45,13 +46,13 @@ func (a *applier) cardCreate(ctx context.Context, p *protocol.CardCreate) error 
 		Rank:        pl.rank,
 		CreatedBy:   a.actor,
 	})
+	if errors.Is(err, storage.ErrDuplicateID) {
+		return idUnavailable("card_id")
+	}
 	if err != nil {
 		return fmt.Errorf("insert card: %w", err)
 	}
-	if err := a.emit(ctx, protocol.EventCardCreated, protocol.CardCreated{Card: protocol.FromCard(card), ActorID: a.actor}); err != nil {
-		return err
-	}
-	return a.emitCardRebalance(ctx, col.ID, pl)
+	return a.emit(ctx, protocol.EventCardCreated, protocol.CardCreated{Card: protocol.FromCard(card), ActorID: a.actor})
 }
 
 func optionalDescription(description *string) (string, error) {
@@ -150,17 +151,14 @@ func (a *applier) cardMove(ctx context.Context, p *protocol.CardMove) error {
 	if err != nil {
 		return fmt.Errorf("move card: %w", err)
 	}
-	if err := a.emit(ctx, protocol.EventCardMoved, protocol.CardMoved{
+	return a.emit(ctx, protocol.EventCardMoved, protocol.CardMoved{
 		CardID:       moved.ID,
 		FromColumnID: card.ColumnID,
 		ToColumnID:   moved.ColumnID,
 		Rank:         moved.Rank,
 		Version:      moved.Version,
 		ActorID:      a.actor,
-	}); err != nil {
-		return err
-	}
-	return a.emitCardRebalance(ctx, col.ID, pl)
+	})
 }
 
 func (a *applier) cardArchive(ctx context.Context, p *protocol.CardArchive) error {
@@ -186,6 +184,9 @@ func (a *applier) cardRanks(columnID uuid.UUID) rankScope {
 		},
 		rerank: func(ctx context.Context, items []storage.RankedItem) error {
 			return a.btx.RerankCards(ctx, columnID, items)
+		},
+		announce: func(ctx context.Context, pl placement) error {
+			return a.emitCardRebalance(ctx, columnID, pl)
 		},
 	}
 }

@@ -586,7 +586,12 @@ func TestProcessedOpsRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, found)
 
-		require.NoError(t, btx.SaveProcessedOp(ctx, opID, c.owner.ID, map[string]any{"kind": "event", "seq": 3}))
+		saved, err := btx.SaveProcessedOp(ctx, opID, c.owner.ID, map[string]any{"kind": "event", "seq": 3})
+		require.NoError(t, err)
+		assert.True(t, saved)
+		saved, err = btx.SaveProcessedOp(ctx, opID, c.owner.ID, map[string]any{"kind": "nack"})
+		require.NoError(t, err)
+		assert.False(t, saved, "a second insert for the same op_id is ignored")
 		got, found, err := btx.ProcessedOp(ctx, opID)
 		require.NoError(t, err)
 		require.True(t, found)

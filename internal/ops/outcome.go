@@ -13,11 +13,13 @@ import (
 )
 
 const (
-	outcomeEvent = "event"
-	outcomeNack  = "nack"
+	outcomeVersion = 1
+	outcomeEvent   = "event"
+	outcomeNack    = "nack"
 )
 
 type storedOutcome struct {
+	V       int    `json:"v"`
 	Kind    string `json:"kind"`
 	Seq     int64  `json:"seq,omitempty"`
 	Reason  string `json:"reason,omitempty"`
@@ -26,35 +28,35 @@ type storedOutcome struct {
 }
 
 func eventOutcome(ev domain.Event) storedOutcome {
-	return storedOutcome{Kind: outcomeEvent, Seq: ev.Seq}
+	return storedOutcome{V: outcomeVersion, Kind: outcomeEvent, Seq: ev.Seq}
 }
 
 func nackOutcome(n protocol.Nack) storedOutcome {
-	return storedOutcome{Kind: outcomeNack, Reason: n.Reason, AtSeq: n.AtSeq, Message: n.Message}
+	return storedOutcome{V: outcomeVersion, Kind: outcomeNack, Reason: n.Reason, AtSeq: n.AtSeq, Message: n.Message}
 }
 
 func (s storedOutcome) nack() protocol.Nack {
 	return protocol.Nack{Reason: s.Reason, AtSeq: s.AtSeq, Message: s.Message}
 }
 
-func saveOutcome(ctx context.Context, btx *storage.BoardTx, opID, userID uuid.UUID, outcome storedOutcome) error {
-	if err := btx.SaveProcessedOp(ctx, opID, userID, outcome); err != nil {
-		return fmt.Errorf("save processed op: %w", err)
+func saveOutcome(ctx context.Context, btx *storage.BoardTx, opID, userID uuid.UUID, outcome storedOutcome) (bool, error) {
+	saved, err := btx.SaveProcessedOp(ctx, opID, userID, outcome)
+	if err != nil {
+		return false, fmt.Errorf("save processed op: %w", err)
 	}
-	return nil
+	return saved, nil
 }
 
 func replay(ctx context.Context, btx *storage.BoardTx, prev storage.ProcessedOp, userID uuid.UUID) (Outcome, error) {
 	if prev.BoardID != btx.Board().ID || prev.UserID != userID {
-		return Outcome{Nack: &protocol.Nack{
-			Reason:  protocol.ReasonValidation,
-			AtSeq:   btx.Board().Seq,
-			Message: "op_id was already used by another operation",
-		}}, nil
+		return transientNack(btx, opIDTaken()), nil
 	}
 	var stored storedOutcome
 	if err := json.Unmarshal(prev.Outcome, &stored); err != nil {
 		return Outcome{}, fmt.Errorf("decode processed op outcome: %w", err)
+	}
+	if stored.V != outcomeVersion {
+		return Outcome{}, fmt.Errorf("unsupported processed op outcome version %d", stored.V)
 	}
 	switch stored.Kind {
 	case outcomeEvent:
@@ -68,4 +70,8 @@ func replay(ctx context.Context, btx *storage.BoardTx, prev storage.ProcessedOp,
 		return Outcome{Nack: &nack, Replayed: true}, nil
 	}
 	return Outcome{}, fmt.Errorf("unknown processed op outcome kind %q", stored.Kind)
+}
+
+func transientNack(btx *storage.BoardTx, rej *rejection) Outcome {
+	return Outcome{Nack: &protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}}
 }

@@ -378,7 +378,7 @@ func TestRebalanceWhenRanksGrowTooLong(t *testing.T) {
 				rebalanced = true
 				payload := decode[protocol.ColumnRebalanced](t, ev)
 				assert.Equal(t, col, payload.ColumnID)
-				assert.Greater(t, ev.Seq, out.Event.Seq)
+				assert.Less(t, ev.Seq, out.Event.Seq, "the rebalance precedes the primary event")
 				assert.Nil(t, ev.OpID)
 			}
 		}

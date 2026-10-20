@@ -302,8 +302,8 @@ func TestCardRebalanceEmitsAnExtraEventWithoutBumpingVersions(t *testing.T) {
 	primary, extra := *out.Event, out.Extra[0]
 	assert.Equal(t, protocol.EventCardCreated, primary.Type)
 	assert.Equal(t, protocol.EventColumnRebalanced, extra.Type)
-	assert.Equal(t, seqBefore+1, primary.Seq)
-	assert.Equal(t, seqBefore+2, extra.Seq)
+	assert.Equal(t, seqBefore+1, extra.Seq, "the rebalance is appended before the primary event")
+	assert.Equal(t, seqBefore+2, primary.Seq)
 	require.NotNil(t, primary.OpID)
 	assert.Nil(t, extra.OpID, "the rebalance is not the confirmation of the client op")
 	require.NotNil(t, extra.ActorID)
@@ -313,8 +313,8 @@ func TestCardRebalanceEmitsAnExtraEventWithoutBumpingVersions(t *testing.T) {
 	created := decode[protocol.CardCreated](t, primary)
 	rebalanced := decode[protocol.ColumnRebalanced](t, extra)
 	assert.Equal(t, col, rebalanced.ColumnID)
-	require.Len(t, rebalanced.Cards, 4)
-	assert.Equal(t, []uuid.UUID{first, middle, newCard, last}, []uuid.UUID{rebalanced.Cards[0].CardID, rebalanced.Cards[1].CardID, rebalanced.Cards[2].CardID, rebalanced.Cards[3].CardID})
+	require.Len(t, rebalanced.Cards, 3, "the rebalance respaces only cards that already exist")
+	assert.Equal(t, []uuid.UUID{first, middle, last}, []uuid.UUID{rebalanced.Cards[0].CardID, rebalanced.Cards[1].CardID, rebalanced.Cards[2].CardID})
 	ranks := make([]string, len(rebalanced.Cards))
 	for i, r := range rebalanced.Cards {
 		ranks[i] = r.Rank
@@ -322,7 +322,9 @@ func TestCardRebalanceEmitsAnExtraEventWithoutBumpingVersions(t *testing.T) {
 		assert.LessOrEqual(t, len(r.Rank), rank.MaxLength)
 	}
 	assertStrictlyIncreasing(t, ranks, "rebalanced ranks")
-	assert.Equal(t, ranks[2], created.Rank, "the created event already carries the rank the card ends with")
+	assert.Less(t, ranks[1], created.Rank, "the new card lands after its anchor in the respaced list")
+	assert.Less(t, created.Rank, ranks[2])
+	assert.Equal(t, created.Rank, f.cardRow(t, newCard).Rank)
 
 	for id, v := range versionsBefore {
 		state := f.cardRow(t, id)
@@ -336,7 +338,7 @@ func TestCardRebalanceEmitsAnExtraEventWithoutBumpingVersions(t *testing.T) {
 	require.Len(t, f.pub.batches, publishedBefore+1)
 	batch := f.pub.batches[publishedBefore]
 	require.Len(t, batch, 2)
-	assert.Equal(t, []string{protocol.EventCardCreated, protocol.EventColumnRebalanced}, []string{batch[0].Type, batch[1].Type})
+	assert.Equal(t, []string{protocol.EventColumnRebalanced, protocol.EventCardCreated}, []string{batch[0].Type, batch[1].Type})
 	assert.Equal(t, seqBefore+1, batch[0].Seq)
 	assert.Equal(t, seqBefore+2, batch[1].Seq)
 }
@@ -416,17 +418,18 @@ func TestColumnRebalanceEmitsColumnsRebalanced(t *testing.T) {
 	extra := out.Extra[0]
 	assert.Equal(t, protocol.EventColumnsRebalanced, extra.Type)
 	assert.Nil(t, extra.OpID)
-	assert.Equal(t, seqBefore+2, extra.Seq)
+	assert.Equal(t, seqBefore+1, extra.Seq)
+	assert.Equal(t, seqBefore+2, out.Event.Seq)
 
 	rebalanced := decode[protocol.ColumnsRebalanced](t, extra)
-	require.Len(t, rebalanced.Columns, 4)
+	require.Len(t, rebalanced.Columns, 3)
 	got := make([]uuid.UUID, len(rebalanced.Columns))
 	ranks := make([]string, len(rebalanced.Columns))
 	for i, r := range rebalanced.Columns {
 		got[i], ranks[i] = r.ColumnID, r.Rank
 		assert.Equal(t, r.Rank, f.columnRow(t, r.ColumnID).Rank)
 	}
-	assert.Equal(t, []uuid.UUID{a, b, newCol, c}, got)
+	assert.Equal(t, []uuid.UUID{a, b, c}, got)
 	assertStrictlyIncreasing(t, ranks, "rebalanced column ranks")
 	for id, v := range versions {
 		assert.Equal(t, v, f.columnRow(t, id).Version, "rebalancing must not bump column versions")
@@ -540,11 +543,15 @@ func TestAnchorFallbackRulesForCardMove(t *testing.T) {
 	move(nil, &x, dst)
 	assert.Equal(t, []string{"mover", "x", "y"}, cardTitles(f.snapshot(t), dst))
 
-	move(&mover, nil, dst)
-	assert.Equal(t, []string{"x", "y", "mover"}, cardTitles(f.snapshot(t), dst), "an anchor pointing at the moved card itself is treated as missing")
+	n := f.mustNack(t, protocol.ReasonValidation, protocol.OpCardMove, protocol.CardMove{CardID: mover, ToColumnID: dst, AfterID: &mover, BaseVersion: &version})
+	assert.Contains(t, n.Message, "after_id")
+	n = f.mustNack(t, protocol.ReasonValidation, protocol.OpCardMove, protocol.CardMove{CardID: mover, ToColumnID: dst, BeforeID: &mover, BaseVersion: &version})
+	assert.Contains(t, n.Message, "before_id")
+	assert.Equal(t, []string{"mover", "x", "y"}, cardTitles(f.snapshot(t), dst), "a rejected self anchor leaves the order untouched")
 
-	move(&mover, &y, dst)
-	assert.Equal(t, []string{"x", "mover", "y"}, cardTitles(f.snapshot(t), dst), "a self anchor falls back to the remaining anchor")
+	f.mustNack(t, protocol.ReasonValidation, protocol.OpCardMove, protocol.CardMove{CardID: mover, ToColumnID: dst, AfterID: &mover, BeforeID: &y, BaseVersion: &version})
+	move(&x, &y, dst)
+	assert.Equal(t, []string{"x", "mover", "y"}, cardTitles(f.snapshot(t), dst))
 
 	move(&y, nil, src)
 	assert.Equal(t, []string{"mover"}, cardTitles(f.snapshot(t), src))
@@ -584,8 +591,10 @@ func TestAnchorFallbackRulesForColumns(t *testing.T) {
 	assert.Equal(t, "archived-anchor", titles()[len(titles())-1])
 
 	version := f.columnRow(t, b).Version
-	f.mustEvent(t, protocol.OpColumnMove, protocol.ColumnMove{ColumnID: b, AfterID: &b, BaseVersion: &version})
-	assert.Equal(t, "B", titles()[len(titles())-1], "a self anchor falls back to the end of the list")
+	before := titles()
+	n := f.mustNack(t, protocol.ReasonValidation, protocol.OpColumnMove, protocol.ColumnMove{ColumnID: b, AfterID: &b, BaseVersion: &version})
+	assert.Contains(t, n.Message, "after_id")
+	assert.Equal(t, before, titles(), "a self anchor is rejected without moving the column")
 	assertColumnsHaveUniqueSortedRanks(t, f)
 }
 

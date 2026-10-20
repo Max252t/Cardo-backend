@@ -2,10 +2,12 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
+	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 func (a *applier) columnCreate(ctx context.Context, p *protocol.ColumnCreate) error {
@@ -24,13 +26,13 @@ func (a *applier) columnCreate(ctx context.Context, p *protocol.ColumnCreate) er
 		return err
 	}
 	col, err := a.btx.InsertColumn(ctx, domain.Column{ID: p.ColumnID, Title: title, Rank: pl.rank})
+	if errors.Is(err, storage.ErrDuplicateID) {
+		return idUnavailable("column_id")
+	}
 	if err != nil {
 		return fmt.Errorf("insert column: %w", err)
 	}
-	if err := a.emit(ctx, protocol.EventColumnCreated, protocol.ColumnCreated{Column: protocol.FromColumn(col), ActorID: a.actor}); err != nil {
-		return err
-	}
-	return a.emitColumnRebalance(ctx, pl)
+	return a.emit(ctx, protocol.EventColumnCreated, protocol.ColumnCreated{Column: protocol.FromColumn(col), ActorID: a.actor})
 }
 
 func (a *applier) columnRename(ctx context.Context, p *protocol.ColumnRename) error {
@@ -75,15 +77,12 @@ func (a *applier) columnMove(ctx context.Context, p *protocol.ColumnMove) error 
 	if err != nil {
 		return fmt.Errorf("move column: %w", err)
 	}
-	if err := a.emit(ctx, protocol.EventColumnMoved, protocol.ColumnMoved{
+	return a.emit(ctx, protocol.EventColumnMoved, protocol.ColumnMoved{
 		ColumnID: moved.ID,
 		Rank:     moved.Rank,
 		Version:  moved.Version,
 		ActorID:  a.actor,
-	}); err != nil {
-		return err
-	}
-	return a.emitColumnRebalance(ctx, pl)
+	})
 }
 
 func (a *applier) columnArchive(ctx context.Context, p *protocol.ColumnArchive) error {
@@ -103,7 +102,7 @@ func (a *applier) columnArchive(ctx context.Context, p *protocol.ColumnArchive) 
 }
 
 func (a *applier) columnRanks() rankScope {
-	return rankScope{load: a.btx.ColumnRanks, rerank: a.btx.RerankColumns}
+	return rankScope{load: a.btx.ColumnRanks, rerank: a.btx.RerankColumns, announce: a.emitColumnRebalance}
 }
 
 func (a *applier) emitColumnRebalance(ctx context.Context, pl placement) error {

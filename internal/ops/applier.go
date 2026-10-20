@@ -26,7 +26,7 @@ type applier struct {
 func (a *applier) authorize(ctx context.Context) error {
 	role, err := a.btx.MemberRole(ctx, a.actor)
 	if errors.Is(err, domain.ErrNotFound) {
-		return forbidden("not a member of this board")
+		return notMember()
 	}
 	if err != nil {
 		return err
@@ -115,7 +115,7 @@ func requireUnusedID(ctx context.Context, field string, id uuid.UUID, exists fun
 		return err
 	}
 	if used {
-		return invalid(field + ": is already in use")
+		return idUnavailable(field)
 	}
 	return nil
 }

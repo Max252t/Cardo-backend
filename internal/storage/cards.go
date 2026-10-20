@@ -44,11 +44,12 @@ func (b *BoardTx) CardRanks(ctx context.Context, columnID uuid.UUID) ([]RankedIt
 }
 
 func (b *BoardTx) InsertCard(ctx context.Context, c domain.Card) (domain.Card, error) {
-	return scanCard(b.tx.QueryRow(ctx,
+	card, err := scanCard(b.tx.QueryRow(ctx,
 		`INSERT INTO cards (id, board_id, column_id, title, description, rank, created_by, updated_by, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $7, clock_timestamp(), clock_timestamp())
 		 RETURNING `+cardColumns,
 		c.ID, b.board.ID, c.ColumnID, c.Title, c.Description, c.Rank, c.CreatedBy))
+	return card, duplicateIDError(err)
 }
 
 func (b *BoardTx) EditCard(ctx context.Context, id, actorID uuid.UUID, edit CardEdit) (domain.Card, error) {

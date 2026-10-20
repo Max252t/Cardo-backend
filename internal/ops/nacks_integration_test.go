@@ -483,8 +483,9 @@ func TestOutcomeEvents(t *testing.T) {
 	require.Len(t, out.Extra, 1)
 	events := out.Events()
 	require.Len(t, events, 2)
-	assert.Equal(t, *out.Event, events[0])
-	assert.Equal(t, out.Extra[0], events[1])
+	assert.Equal(t, out.Extra[0], events[0], "events are returned in seq order")
+	assert.Equal(t, *out.Event, events[1])
+	assert.Less(t, events[0].Seq, events[1].Seq)
 
 	nack := f.apply(t, protocol.OpCardArchive, protocol.CardArchive{CardID: uuid.New()})
 	assert.Nil(t, nack.Events())

@@ -29,7 +29,9 @@ func (o Outcome) Events() []domain.Event {
 	if o.Event == nil {
 		return nil
 	}
-	return append([]domain.Event{*o.Event}, o.Extra...)
+	events := make([]domain.Event, 0, len(o.Extra)+1)
+	events = append(events, o.Extra...)
+	return append(events, *o.Event)
 }
 
 type Processor struct {
@@ -104,16 +106,9 @@ func applyLocked(ctx context.Context, btx *storage.BoardTx, userID uuid.UUID, op
 	res, err := execute(ctx, btx, userID, op)
 	var rej *rejection
 	if errors.As(err, &rej) {
-		nack := protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}
-		if err := saveOutcome(ctx, btx, op.OpID, userID, nackOutcome(nack)); err != nil {
-			return Outcome{}, err
-		}
-		return Outcome{Nack: &nack}, nil
+		return rejected(ctx, btx, op.OpID, userID, rej)
 	}
 	if err != nil {
-		return Outcome{}, err
-	}
-	if err := saveOutcome(ctx, btx, op.OpID, userID, eventOutcome(res.primary)); err != nil {
 		return Outcome{}, err
 	}
 	primary := res.primary
@@ -130,8 +125,30 @@ func execute(ctx context.Context, btx *storage.BoardTx, userID uuid.UUID, op pro
 		if err := a.run(ctx, op); err != nil {
 			return err
 		}
+		saved, err := saveOutcome(ctx, sp, op.OpID, userID, eventOutcome(a.res.primary))
+		if err != nil {
+			return err
+		}
+		if !saved {
+			return opIDTaken()
+		}
 		res = a.res
 		return nil
 	})
 	return res, err
+}
+
+func rejected(ctx context.Context, btx *storage.BoardTx, opID, userID uuid.UUID, rej *rejection) (Outcome, error) {
+	if rej.transient {
+		return transientNack(btx, rej), nil
+	}
+	nack := protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}
+	saved, err := saveOutcome(ctx, btx, opID, userID, nackOutcome(nack))
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !saved {
+		return transientNack(btx, opIDTaken()), nil
+	}
+	return Outcome{Nack: &nack}, nil
 }

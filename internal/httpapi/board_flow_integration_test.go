@@ -176,7 +176,7 @@ func TestFlowEventLogMatchesOperationOutcomes(t *testing.T) {
 	events := page["events"].([]any)
 	require.Len(t, events, 5, "a nack never appears in the event log")
 
-	wantTypes := []string{protocol.EventColumnCreated, protocol.EventCardCreated, protocol.EventCardCreated, protocol.EventCardCreated, protocol.EventColumnRebalanced}
+	wantTypes := []string{protocol.EventColumnCreated, protocol.EventCardCreated, protocol.EventCardCreated, protocol.EventColumnRebalanced, protocol.EventCardCreated}
 	for i, e := range events {
 		ev := e.(map[string]any)
 		assert.EqualValues(t, 1, ev["v"])
@@ -184,17 +184,17 @@ func TestFlowEventLogMatchesOperationOutcomes(t *testing.T) {
 		assert.Equal(t, wantTypes[i], ev["type"])
 		assert.Greater(t, ev["server_ts"].(float64), float64(1_600_000_000_000))
 		assert.NotNil(t, ev["payload"])
-		if i < 4 {
+		if i != 3 {
 			assert.NotEmpty(t, ev["op_id"])
 		} else {
 			assert.NotContains(t, ev, "op_id", "rebalance events are not tied to a client op")
 		}
 	}
-	assert.Equal(t, out.Event.OpID.String(), events[3].(map[string]any)["op_id"])
+	assert.Equal(t, out.Event.OpID.String(), events[4].(map[string]any)["op_id"], "the rebalance precedes the confirming event")
 
-	rebalanced := events[4].(map[string]any)["payload"].(map[string]any)
+	rebalanced := events[3].(map[string]any)["payload"].(map[string]any)
 	assert.Equal(t, col.String(), rebalanced["column_id"])
-	assert.Len(t, rebalanced["cards"], 3)
+	assert.Len(t, rebalanced["cards"], 2, "only cards that already existed are respaced")
 }
 
 func TestFlowEventLogPaginationAcrossThePageLimit(t *testing.T) {

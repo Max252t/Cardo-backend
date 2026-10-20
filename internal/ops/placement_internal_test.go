@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
@@ -67,16 +68,36 @@ func TestPlaceRebalancesLongOrInvalidRanks(t *testing.T) {
 	self := list[1].ID
 	p, err := place(list, self, &list[0].ID, nil)
 	require.NoError(t, err)
-	require.Len(t, p.rebalance, 3)
-	assert.Equal(t, list[0].ID, p.rebalance[0].ID)
-	assert.Equal(t, self, p.rebalance[1].ID)
-	assert.Equal(t, p.rebalance[1].Rank, p.rank)
-	assert.Len(t, p.rerank, 3, "every row already in the list is reranked")
+	require.Len(t, p.rebalance, 3, "every row already in the list is respaced")
+	for i, it := range p.rebalance {
+		assert.Equal(t, list[i].ID, it.ID, "respacing keeps the current order")
+	}
+	assert.Less(t, p.rebalance[0].Rank, p.rank)
+	assert.Less(t, p.rank, p.rebalance[2].Rank)
 
 	newcomer := uuid.New()
 	p, err = place(list, newcomer, nil, nil)
 	require.NoError(t, err)
-	require.Len(t, p.rebalance, 4)
-	assert.Equal(t, newcomer, p.rebalance[3].ID)
-	assert.Len(t, p.rerank, 3, "the newcomer is inserted, not reranked")
+	require.Len(t, p.rebalance, 3, "the newcomer is placed after respacing, not part of it")
+	assert.Greater(t, p.rank, p.rebalance[2].Rank)
+}
+
+func TestPlaceRejectsSelfAnchors(t *testing.T) {
+	t.Parallel()
+	list := items("a0", "a1")
+	self := list[0].ID
+	for _, tc := range []struct {
+		after, before *uuid.UUID
+		field         string
+	}{
+		{&self, nil, "after_id"},
+		{nil, &self, "before_id"},
+		{&list[1].ID, &self, "before_id"},
+	} {
+		_, err := place(list, self, tc.after, tc.before)
+		var rej *rejection
+		require.ErrorAs(t, err, &rej)
+		assert.Equal(t, protocol.ReasonValidation, rej.reason)
+		assert.Contains(t, rej.message, tc.field)
+	}
 }

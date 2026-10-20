@@ -33,13 +33,17 @@ func (b *BoardTx) ProcessedOp(ctx context.Context, opID uuid.UUID) (ProcessedOp,
 	return p, true, nil
 }
 
-func (b *BoardTx) SaveProcessedOp(ctx context.Context, opID, userID uuid.UUID, outcome any) error {
+func (b *BoardTx) SaveProcessedOp(ctx context.Context, opID, userID uuid.UUID, outcome any) (bool, error) {
 	data, err := json.Marshal(outcome)
 	if err != nil {
-		return fmt.Errorf("marshal op outcome: %w", err)
+		return false, fmt.Errorf("marshal op outcome: %w", err)
 	}
-	_, err = b.tx.Exec(ctx,
-		`INSERT INTO processed_ops (op_id, board_id, user_id, outcome) VALUES ($1, $2, $3, $4)`,
+	tag, err := b.tx.Exec(ctx,
+		`INSERT INTO processed_ops (op_id, board_id, user_id, outcome) VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (op_id) DO NOTHING`,
 		opID, b.board.ID, userID, data)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }
