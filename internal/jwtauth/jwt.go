@@ -1,4 +1,4 @@
-package auth
+package jwtauth
 
 import (
 	"errors"
@@ -8,36 +8,34 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
-type AccessTokens interface {
-	Issue(userID uuid.UUID) (string, time.Time, error)
-	Verify(token string) (uuid.UUID, error)
-}
+var _ auth.AccessTokens = (*Manager)(nil)
 
 const ClockSkewLeeway = 30 * time.Second
 
-type JWTConfig struct {
+type Config struct {
 	Secret   []byte
 	Issuer   string
 	Audience string
 	TTL      time.Duration
 }
 
-type JWTManager struct {
-	cfg   JWTConfig
-	clock Clock
+type Manager struct {
+	cfg   Config
+	clock auth.Clock
 }
 
-func NewJWTManager(cfg JWTConfig, clock Clock) *JWTManager {
+func New(cfg Config, clock auth.Clock) *Manager {
 	if clock == nil {
-		clock = SystemClock{}
+		clock = auth.SystemClock{}
 	}
-	return &JWTManager{cfg: cfg, clock: clock}
+	return &Manager{cfg: cfg, clock: clock}
 }
 
-func (m *JWTManager) Issue(userID uuid.UUID) (string, time.Time, error) {
+func (m *Manager) Issue(userID uuid.UUID) (string, time.Time, error) {
 	now := m.clock.Now()
 	exp := now.Add(m.cfg.TTL)
 	claims := jwt.RegisteredClaims{
@@ -56,12 +54,12 @@ func (m *JWTManager) Issue(userID uuid.UUID) (string, time.Time, error) {
 	return signed, exp, nil
 }
 
-func (m *JWTManager) Verify(token string) (uuid.UUID, error) {
+func (m *Manager) Verify(token string) (uuid.UUID, error) {
 	c, err := m.Parse(token)
 	return c.UserID, err
 }
 
-func (m *JWTManager) Parse(token string) (domain.AccessClaims, error) {
+func (m *Manager) Parse(token string) (domain.AccessClaims, error) {
 	claims := &jwt.RegisteredClaims{}
 	_, err := jwt.ParseWithClaims(token, claims,
 		func(*jwt.Token) (any, error) { return m.cfg.Secret, nil },

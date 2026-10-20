@@ -7,9 +7,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/config"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/presencestore"
@@ -24,7 +24,7 @@ type realtimeStack struct {
 	stop   func()
 }
 
-func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client, jwt *auth.JWTManager, logger *slog.Logger) (*realtimeStack, error) {
+func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client, jwt *jwtauth.Manager, logger *slog.Logger) (*realtimeStack, error) {
 	broker, presenceStore := newTransport(rdb, logger)
 	publisher := pubsub.NewEventPublisher(broker)
 	boardService := boards.NewService(store, boards.WithPublisher(publisher), boards.WithLogger(logger))

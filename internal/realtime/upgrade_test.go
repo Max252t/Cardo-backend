@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
 	"github.com/Max252t/Cardo-backend/internal/realtime/rttest"
@@ -89,11 +89,11 @@ func TestUpgradeRejectsExpiredAndForeignTokens(t *testing.T) {
 	env, ann, inst := newEditorEnv(t, nil)
 	expired, _, err := shortLivedTokens(env, time.Minute).Issue(ann)
 	require.NoError(t, err)
-	foreign, _, err := auth.NewJWTManager(auth.JWTConfig{
+	foreign, _, err := jwtauth.New(jwtauth.Config{
 		Secret: []byte("another-secret-another-secret-12"), Issuer: "test", Audience: "test", TTL: time.Hour,
 	}, env.Clock).Issue(ann)
 	require.NoError(t, err)
-	wrongAudience, _, err := auth.NewJWTManager(auth.JWTConfig{
+	wrongAudience, _, err := jwtauth.New(jwtauth.Config{
 		Secret: []byte("0123456789abcdef0123456789abcdef"), Issuer: "test", Audience: "elsewhere", TTL: time.Hour,
 	}, env.Clock).Issue(ann)
 	require.NoError(t, err)

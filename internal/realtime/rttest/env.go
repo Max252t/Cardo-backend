@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
-	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
@@ -27,7 +27,7 @@ type Env struct {
 	Clock    *FakeClock
 	Network  *pubsub.MemoryNetwork
 	Presence *presencestore.MemoryStore
-	Tokens   *auth.JWTManager
+	Tokens   *jwtauth.Manager
 	Board    *Board
 	Config   realtime.Config
 	Sync     realtime.SyncSource
@@ -45,7 +45,7 @@ func NewEnv(t testing.TB) *Env {
 		Clock:    clock,
 		Network:  network,
 		Presence: presencestore.NewMemoryStore(),
-		Tokens: auth.NewJWTManager(auth.JWTConfig{
+		Tokens: jwtauth.New(jwtauth.Config{
 			Secret:   jwtSecret,
 			Issuer:   "test",
 			Audience: "test",

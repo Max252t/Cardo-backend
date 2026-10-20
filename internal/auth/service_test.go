@@ -12,6 +12,7 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 )
 
@@ -22,7 +23,7 @@ type fixture struct {
 	store   *fakeStore
 	clock   *fakeClock
 	limiter *ratelimit.MemoryLimiter
-	jwt     *auth.JWTManager
+	jwt     *jwtauth.Manager
 	hasher  *auth.Argon2Hasher
 }
 

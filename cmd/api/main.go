@@ -20,6 +20,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/users"
@@ -62,7 +63,7 @@ func run() error {
 		})
 	}
 
-	jwtManager := auth.NewJWTManager(auth.JWTConfig{
+	jwtManager := jwtauth.New(jwtauth.Config{
 		Secret:   cfg.JWTSecret,
 		Issuer:   cfg.JWTIssuer,
 		Audience: cfg.JWTAudience,

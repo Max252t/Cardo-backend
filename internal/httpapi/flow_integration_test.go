@@ -20,6 +20,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
@@ -80,7 +81,7 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 		readiness["redis"] = httpapi.CheckerFunc(func(ctx context.Context) error { return redisClient.Ping(ctx).Err() })
 	}
 
-	jwtm := auth.NewJWTManager(auth.JWTConfig{
+	jwtm := jwtauth.New(jwtauth.Config{
 		Secret:   []byte("0123456789abcdef0123456789abcdef"),
 		Issuer:   "cardo",
 		Audience: "cardo-api",
