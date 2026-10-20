@@ -35,7 +35,6 @@ func assertSilent(t *testing.T, b pubsub.Broker) {
 	}
 }
 
-
 func TestMemoryBrokersShareANetwork(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
