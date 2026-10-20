@@ -30,6 +30,8 @@ type Env struct {
 	Board    *Board
 	Config   realtime.Config
 	Sync     realtime.SyncSource
+	Ops      realtime.OpApplier
+	Members  realtime.MemberLookup
 }
 
 func NewEnv(t testing.TB) *Env {
@@ -83,9 +85,9 @@ func (e *Env) StartInstance(t testing.TB, name string) *Instance {
 	hub, err := realtime.NewHub(realtime.Deps{
 		Bus:      broker,
 		Presence: svc,
-		Ops:      e.Board,
+		Ops:      e.opApplier(),
 		Sync:     e.syncSource(),
-		Members:  e.Board,
+		Members:  e.memberLookup(),
 		Tokens:   e.Tokens,
 		Clock:    e.Clock,
 	}, e.Config)
@@ -161,4 +163,35 @@ func (i *Instance) TryDial(boardID uuid.UUID, authorization string, header http.
 		}
 	}
 	return conn, status, err
+}
+
+func (e *Env) opApplier() realtime.OpApplier {
+	if e.Ops != nil {
+		return e.Ops
+	}
+	return e.Board
+}
+
+func (e *Env) memberLookup() realtime.MemberLookup {
+	if e.Members != nil {
+		return e.Members
+	}
+	return e.Board
+}
+
+func (e *Env) NewPublisher(t testing.TB) *pubsub.EventPublisher {
+	t.Helper()
+	broker := e.Network.NewBroker()
+	t.Cleanup(func() { _ = broker.Close() })
+	return pubsub.NewEventPublisher(broker)
+}
+
+func (e *Env) DialBoard(t testing.TB, inst *Instance, boardID uuid.UUID, userID uuid.UUID) *Conn {
+	t.Helper()
+	conn, status, err := inst.TryDial(boardID, "Bearer "+e.IssueToken(t, userID), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v (status %d)", err, status)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return &Conn{Conn: conn, t: t}
 }

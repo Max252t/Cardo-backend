@@ -190,7 +190,7 @@ func (c *Client) closeWith(code int, reason string) {
 	select {
 	case c.send <- outbound{isClose: true, closeCode: code, closeReason: reason}:
 	default:
-		c.forceClose(code, reason)
+		go c.forceClose(code, reason)
 	}
 }
 
@@ -198,7 +198,7 @@ func (c *Client) closeNow(code int, reason string) {
 	if !c.closing.CompareAndSwap(false, true) {
 		return
 	}
-	c.forceClose(code, reason)
+	go c.forceClose(code, reason)
 }
 
 func (c *Client) forceClose(code int, reason string) {
