@@ -248,3 +248,19 @@ func TestJWTToleratesClockSkewBetweenInstances(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, userID, got)
 }
+
+func TestJWTParseReturnsExpiry(t *testing.T) {
+	t.Parallel()
+	m := newJWT(newFakeClock())
+	userID := uuid.New()
+	token, exp, err := m.Issue(userID)
+	require.NoError(t, err)
+
+	claims, err := m.Parse(token)
+	require.NoError(t, err)
+	assert.Equal(t, userID, claims.UserID)
+	assert.True(t, exp.Equal(claims.ExpiresAt))
+
+	_, err = m.Parse("garbage")
+	require.ErrorIs(t, err, domain.ErrTokenInvalid)
+}

@@ -93,6 +93,11 @@ type ProfileUpdate struct {
 	AvatarColor *string
 }
 
+type AccessClaims struct {
+	UserID    uuid.UUID
+	ExpiresAt time.Time
+}
+
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID

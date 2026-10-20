@@ -57,6 +57,11 @@ func (m *JWTManager) Issue(userID uuid.UUID) (string, time.Time, error) {
 }
 
 func (m *JWTManager) Verify(token string) (uuid.UUID, error) {
+	c, err := m.Parse(token)
+	return c.UserID, err
+}
+
+func (m *JWTManager) Parse(token string) (domain.AccessClaims, error) {
 	claims := &jwt.RegisteredClaims{}
 	_, err := jwt.ParseWithClaims(token, claims,
 		func(*jwt.Token) (any, error) { return m.cfg.Secret, nil },
@@ -70,13 +75,13 @@ func (m *JWTManager) Verify(token string) (uuid.UUID, error) {
 	)
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return uuid.Nil, domain.ErrTokenExpired
+			return domain.AccessClaims{}, domain.ErrTokenExpired
 		}
-		return uuid.Nil, domain.ErrTokenInvalid
+		return domain.AccessClaims{}, domain.ErrTokenInvalid
 	}
 	id, err := uuid.Parse(claims.Subject)
-	if err != nil || id == uuid.Nil {
-		return uuid.Nil, domain.ErrTokenInvalid
+	if err != nil || id == uuid.Nil || claims.ExpiresAt == nil {
+		return domain.AccessClaims{}, domain.ErrTokenInvalid
 	}
-	return id, nil
+	return domain.AccessClaims{UserID: id, ExpiresAt: claims.ExpiresAt.Time}, nil
 }
