@@ -39,7 +39,7 @@ func newBoardFlowWithBoard(t *testing.T) *boardFlow {
 	}
 }
 
-func (b *boardFlow) apply(t *testing.T, user session, opType string, payload any) ops.Outcome {
+func (b *boardFlow) apply(t *testing.T, user session, opType string, payload any) protocol.OpOutcome {
 	t.Helper()
 	op, err := protocol.NewOp(opType, uuid.New(), payload)
 	require.NoError(t, err)
@@ -48,7 +48,7 @@ func (b *boardFlow) apply(t *testing.T, user session, opType string, payload any
 	return out
 }
 
-func (b *boardFlow) mustApply(t *testing.T, opType string, payload any) ops.Outcome {
+func (b *boardFlow) mustApply(t *testing.T, opType string, payload any) protocol.OpOutcome {
 	t.Helper()
 	out := b.apply(t, b.owner, opType, payload)
 	require.Nil(t, out.Nack, "unexpected nack %+v", out.Nack)

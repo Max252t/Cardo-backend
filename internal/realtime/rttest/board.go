@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
@@ -148,33 +147,33 @@ func (b *Board) BoardMember(_ context.Context, boardID, userID uuid.UUID) (domai
 	return m, nil
 }
 
-func (b *Board) Apply(ctx context.Context, userID, _ uuid.UUID, op protocol.Op) (ops.Outcome, error) {
+func (b *Board) Apply(ctx context.Context, userID, _ uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
 	b.mu.Lock()
 	b.applyCount++
 	if err := b.failNext; err != nil {
 		b.failNext = nil
 		b.mu.Unlock()
-		return ops.Outcome{}, err
+		return protocol.OpOutcome{}, err
 	}
 	m, member := b.members[userID]
 	switch {
 	case b.deleted || !member:
 		b.mu.Unlock()
-		return ops.Outcome{}, domain.ErrNotFound
+		return protocol.OpOutcome{}, domain.ErrNotFound
 	case !m.Role.AtLeast(domain.RoleEditor):
 		nack := protocol.Nack{Reason: protocol.ReasonForbidden, AtSeq: b.seq, Message: "forbidden"}
 		b.mu.Unlock()
-		return ops.Outcome{Nack: &nack}, nil
+		return protocol.OpOutcome{Nack: &nack}, nil
 	}
 	if prev, done := b.processed[op.OpID]; done {
 		b.mu.Unlock()
-		return ops.Outcome{Event: &prev, Replayed: true}, nil
+		return protocol.OpOutcome{Event: &prev, Replayed: true}, nil
 	}
 	opID := op.OpID
 	ev := b.appendLocked(strings.TrimPrefix(op.Type, "op."), op.Payload, &opID, userID)
 	b.processed[op.OpID] = ev
 	b.mu.Unlock()
-	return ops.Outcome{Event: &ev}, b.publish(ctx, ev)
+	return protocol.OpOutcome{Event: &ev}, b.publish(ctx, ev)
 }
 
 func (b *Board) Snapshot(_ context.Context, userID, _ uuid.UUID) (domain.BoardSnapshot, error) {

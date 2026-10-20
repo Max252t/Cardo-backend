@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/realtime/rttest"
@@ -37,10 +36,10 @@ func (m multiBoard) BoardMember(ctx context.Context, boardID, userID uuid.UUID) 
 	return b.BoardMember(ctx, boardID, userID)
 }
 
-func (m multiBoard) Apply(ctx context.Context, userID, boardID uuid.UUID, op protocol.Op) (ops.Outcome, error) {
+func (m multiBoard) Apply(ctx context.Context, userID, boardID uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
 	b, err := m.find(boardID)
 	if err != nil {
-		return ops.Outcome{}, err
+		return protocol.OpOutcome{}, err
 	}
 	return b.Apply(ctx, userID, boardID, op)
 }

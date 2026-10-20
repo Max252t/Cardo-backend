@@ -47,31 +47,31 @@ func saveOutcome(ctx context.Context, btx boardtx.Tx, opID, userID uuid.UUID, ou
 	return saved, nil
 }
 
-func replay(ctx context.Context, btx boardtx.Tx, prev domain.ProcessedOp, userID uuid.UUID) (Outcome, error) {
+func replay(ctx context.Context, btx boardtx.Tx, prev domain.ProcessedOp, userID uuid.UUID) (protocol.OpOutcome, error) {
 	if prev.BoardID != btx.Board().ID || prev.UserID != userID {
 		return transientNack(btx, opIDTaken()), nil
 	}
 	var stored storedOutcome
 	if err := json.Unmarshal(prev.Outcome, &stored); err != nil {
-		return Outcome{}, fmt.Errorf("decode processed op outcome: %w", err)
+		return protocol.OpOutcome{}, fmt.Errorf("decode processed op outcome: %w", err)
 	}
 	if stored.V != outcomeVersion {
-		return Outcome{}, fmt.Errorf("unsupported processed op outcome version %d", stored.V)
+		return protocol.OpOutcome{}, fmt.Errorf("unsupported processed op outcome version %d", stored.V)
 	}
 	switch stored.Kind {
 	case outcomeEvent:
 		ev, err := btx.EventBySeq(ctx, stored.Seq)
 		if err != nil {
-			return Outcome{}, fmt.Errorf("read replayed event %d: %w", stored.Seq, err)
+			return protocol.OpOutcome{}, fmt.Errorf("read replayed event %d: %w", stored.Seq, err)
 		}
-		return Outcome{Event: &ev, Replayed: true}, nil
+		return protocol.OpOutcome{Event: &ev, Replayed: true}, nil
 	case outcomeNack:
 		nack := stored.nack()
-		return Outcome{Nack: &nack, Replayed: true}, nil
+		return protocol.OpOutcome{Nack: &nack, Replayed: true}, nil
 	}
-	return Outcome{}, fmt.Errorf("unknown processed op outcome kind %q", stored.Kind)
+	return protocol.OpOutcome{}, fmt.Errorf("unknown processed op outcome kind %q", stored.Kind)
 }
 
-func transientNack(btx boardtx.Tx, rej *rejection) Outcome {
-	return Outcome{Nack: &protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}}
+func transientNack(btx boardtx.Tx, rej *rejection) protocol.OpOutcome {
+	return protocol.OpOutcome{Nack: &protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}}
 }

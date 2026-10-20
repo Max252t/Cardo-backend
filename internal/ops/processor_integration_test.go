@@ -76,7 +76,7 @@ func (f *fixture) member(t *testing.T, role domain.Role) domain.User {
 	return u
 }
 
-func (f *fixture) applyAs(t *testing.T, user uuid.UUID, opID uuid.UUID, opType string, payload any) ops.Outcome {
+func (f *fixture) applyAs(t *testing.T, user uuid.UUID, opID uuid.UUID, opType string, payload any) protocol.OpOutcome {
 	t.Helper()
 	op, err := protocol.NewOp(opType, opID, payload)
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func (f *fixture) applyAs(t *testing.T, user uuid.UUID, opID uuid.UUID, opType s
 	return out
 }
 
-func (f *fixture) apply(t *testing.T, opType string, payload any) ops.Outcome {
+func (f *fixture) apply(t *testing.T, opType string, payload any) protocol.OpOutcome {
 	t.Helper()
 	return f.applyAs(t, f.owner.ID, uuid.New(), opType, payload)
 }

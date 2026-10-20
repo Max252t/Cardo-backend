@@ -38,7 +38,7 @@ func (f *fixture) newBoard(t *testing.T, owner uuid.UUID) uuid.UUID {
 	return b.ID
 }
 
-func (f *fixture) applyOnBoard(t *testing.T, boardID, user, opID uuid.UUID, opType string, payload any) ops.Outcome {
+func (f *fixture) applyOnBoard(t *testing.T, boardID, user, opID uuid.UUID, opType string, payload any) protocol.OpOutcome {
 	t.Helper()
 	op, err := protocol.NewOp(opType, opID, payload)
 	require.NoError(t, err)
@@ -47,7 +47,7 @@ func (f *fixture) applyOnBoard(t *testing.T, boardID, user, opID uuid.UUID, opTy
 	return out
 }
 
-func (f *fixture) applyRaw(t *testing.T, user uuid.UUID, opType, payload string) ops.Outcome {
+func (f *fixture) applyRaw(t *testing.T, user uuid.UUID, opType, payload string) protocol.OpOutcome {
 	t.Helper()
 	op := protocol.Op{Type: opType, OpID: uuid.New(), Payload: json.RawMessage(payload)}
 	out, err := f.proc.Apply(context.Background(), user, f.board.ID, op)
@@ -189,7 +189,7 @@ func (f *fixture) requireUnchanged(t *testing.T, seq int64) {
 }
 
 type result struct {
-	out ops.Outcome
+	out protocol.OpOutcome
 	err error
 }
 

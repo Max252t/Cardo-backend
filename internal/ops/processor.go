@@ -18,22 +18,6 @@ type Store interface {
 	WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx.Func) error
 }
 
-type Outcome struct {
-	Event    *domain.Event
-	Extra    []domain.Event
-	Nack     *protocol.Nack
-	Replayed bool
-}
-
-func (o Outcome) Events() []domain.Event {
-	if o.Event == nil {
-		return nil
-	}
-	events := make([]domain.Event, 0, len(o.Extra)+1)
-	events = append(events, o.Extra...)
-	return append(events, *o.Event)
-}
-
 type Processor struct {
 	store     Store
 	publisher boardevents.Publisher
@@ -70,18 +54,18 @@ func NewProcessor(store Store, opts ...Option) *Processor {
 	return p
 }
 
-func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op protocol.Op) (Outcome, error) {
+func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
 	if op.OpID == uuid.Nil {
-		return Outcome{}, domain.NewValidationError("op_id", "is required")
+		return protocol.OpOutcome{}, domain.NewValidationError("op_id", "is required")
 	}
-	var out Outcome
+	var out protocol.OpOutcome
 	err := p.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
 		var err error
 		out, err = applyLocked(ctx, btx, userID, op)
 		return err
 	})
 	if err != nil {
-		return Outcome{}, err
+		return protocol.OpOutcome{}, err
 	}
 	if out.Event != nil && !out.Replayed {
 		events := out.Events()
@@ -94,10 +78,10 @@ func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op pro
 	return out, nil
 }
 
-func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.Op) (Outcome, error) {
+func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
 	prev, found, err := btx.ProcessedOp(ctx, op.OpID)
 	if err != nil {
-		return Outcome{}, fmt.Errorf("read processed op: %w", err)
+		return protocol.OpOutcome{}, fmt.Errorf("read processed op: %w", err)
 	}
 	if found {
 		return replay(ctx, btx, prev, userID)
@@ -109,10 +93,10 @@ func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op proto
 		return rejected(ctx, btx, op.OpID, userID, rej)
 	}
 	if err != nil {
-		return Outcome{}, err
+		return protocol.OpOutcome{}, err
 	}
 	primary := res.primary
-	return Outcome{Event: &primary, Extra: res.extra}, nil
+	return protocol.OpOutcome{Event: &primary, Extra: res.extra}, nil
 }
 
 func execute(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.Op) (result, error) {
@@ -138,17 +122,17 @@ func execute(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.
 	return res, err
 }
 
-func rejected(ctx context.Context, btx boardtx.Tx, opID, userID uuid.UUID, rej *rejection) (Outcome, error) {
+func rejected(ctx context.Context, btx boardtx.Tx, opID, userID uuid.UUID, rej *rejection) (protocol.OpOutcome, error) {
 	if rej.transient {
 		return transientNack(btx, rej), nil
 	}
 	nack := protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}
 	saved, err := saveOutcome(ctx, btx, opID, userID, nackOutcome(nack))
 	if err != nil {
-		return Outcome{}, err
+		return protocol.OpOutcome{}, err
 	}
 	if !saved {
 		return transientNack(btx, opIDTaken()), nil
 	}
-	return Outcome{Nack: &nack}, nil
+	return protocol.OpOutcome{Nack: &nack}, nil
 }

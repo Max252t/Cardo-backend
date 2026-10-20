@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
@@ -178,7 +177,7 @@ func (c *Client) onOp(env protocol.Envelope) {
 	c.finishOp(op, out, err)
 }
 
-func (c *Client) finishOp(op protocol.Op, out ops.Outcome, err error) {
+func (c *Client) finishOp(op protocol.Op, out protocol.OpOutcome, err error) {
 	switch {
 	case err == nil:
 		c.deliverOutcome(op, out)
@@ -201,7 +200,7 @@ func (c *Client) finishOp(op protocol.Op, out ops.Outcome, err error) {
 	}
 }
 
-func (c *Client) deliverOutcome(op protocol.Op, out ops.Outcome) {
+func (c *Client) deliverOutcome(op protocol.Op, out protocol.OpOutcome) {
 	switch {
 	case out.Nack != nil:
 		c.sendNack(op.OpID, *out.Nack)
