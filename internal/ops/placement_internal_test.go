@@ -8,14 +8,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
-func items(ranks ...string) []storage.RankedItem {
-	out := make([]storage.RankedItem, len(ranks))
+func items(ranks ...string) []domain.RankedItem {
+	out := make([]domain.RankedItem, len(ranks))
 	for i, r := range ranks {
-		out[i] = storage.RankedItem{ID: uuid.New(), Rank: r}
+		out[i] = domain.RankedItem{ID: uuid.New(), Rank: r}
 	}
 	return out
 }

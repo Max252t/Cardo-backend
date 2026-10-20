@@ -139,7 +139,7 @@ func (s *Service) publish(ctx context.Context, ev domain.Event) {
 }
 
 func appendUserEvent(ctx context.Context, btx *storage.BoardTx, actorID uuid.UUID, eventType string, payload any) (domain.Event, error) {
-	return btx.AppendEvent(ctx, storage.EventInput{
+	return btx.AppendEvent(ctx, domain.EventDraft{
 		Type:    eventType,
 		Payload: payload,
 		ActorID: &actorID,

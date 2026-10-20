@@ -183,7 +183,7 @@ func TestAppendEventAssignsSequentialSeq(t *testing.T) {
 
 	var events []domain.Event
 	err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		for i, in := range []storage.EventInput{
+		for i, in := range []domain.EventDraft{
 			{Type: "t.nil", Payload: nil},
 			{Type: "t.raw", Payload: json.RawMessage(`{"a":1}`), OpID: &opID, ActorID: &owner.ID},
 			{Type: "t.empty-raw", Payload: json.RawMessage{}},
@@ -243,7 +243,7 @@ func TestAppendEventRejectsEmptyType(t *testing.T) {
 	b := createBoard(t, store, owner.ID, "T")
 
 	err := store.WithBoardLock(context.Background(), b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		_, err := btx.AppendEvent(ctx, storage.EventInput{Payload: nil})
+		_, err := btx.AppendEvent(ctx, domain.EventDraft{Payload: nil})
 		return err
 	})
 	require.Error(t, err)
@@ -264,7 +264,7 @@ func TestWithBoardLockRollsBackOnError(t *testing.T) {
 		if err := btx.SetTitle(ctx, "Changed"); err != nil {
 			return err
 		}
-		if _, err := btx.AppendEvent(ctx, storage.EventInput{Type: "t.x"}); err != nil {
+		if _, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "t.x"}); err != nil {
 			return err
 		}
 		return boom
@@ -286,7 +286,7 @@ func TestAppendEventUnmarshalablePayload(t *testing.T) {
 	b := createBoard(t, store, owner.ID, "T")
 
 	err := store.WithBoardLock(context.Background(), b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		_, err := btx.AppendEvent(ctx, storage.EventInput{Type: "t.bad", Payload: make(chan int)})
+		_, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "t.bad", Payload: make(chan int)})
 		return err
 	})
 	require.Error(t, err)

@@ -5,7 +5,6 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 type rejection struct {
@@ -55,7 +54,7 @@ func asRejection(err error) error {
 	if errors.As(err, &vErr) {
 		return invalid(vErr.Error())
 	}
-	if errors.Is(err, storage.ErrDuplicateID) {
+	if errors.Is(err, domain.ErrDuplicateID) {
 		return invalid("id: is not available")
 	}
 	if errors.Is(err, protocol.ErrUnknownType) {

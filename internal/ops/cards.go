@@ -9,7 +9,6 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 func (a *applier) cardCreate(ctx context.Context, p *protocol.CardCreate) error {
@@ -46,7 +45,7 @@ func (a *applier) cardCreate(ctx context.Context, p *protocol.CardCreate) error 
 		Rank:        pl.rank,
 		CreatedBy:   a.actor,
 	})
-	if errors.Is(err, storage.ErrDuplicateID) {
+	if errors.Is(err, domain.ErrDuplicateID) {
 		return idUnavailable("card_id")
 	}
 	if err != nil {
@@ -94,29 +93,29 @@ func (a *applier) cardEdit(ctx context.Context, p *protocol.CardEdit) error {
 	})
 }
 
-func cardEditFrom(p *protocol.CardEdit) (storage.CardEdit, error) {
+func cardEditFrom(p *protocol.CardEdit) (domain.CardEdit, error) {
 	if p.Title == nil && p.Description == nil {
-		return storage.CardEdit{}, invalid("payload: title or description is required")
+		return domain.CardEdit{}, invalid("payload: title or description is required")
 	}
-	var edit storage.CardEdit
+	var edit domain.CardEdit
 	if p.Title != nil {
 		title, err := domain.NormalizeCardTitle(*p.Title)
 		if err != nil {
-			return storage.CardEdit{}, err
+			return domain.CardEdit{}, err
 		}
 		edit.Title = &title
 	}
 	if p.Description == nil {
 		if p.BaseDescriptionVersion != nil {
-			return storage.CardEdit{}, invalid("base_description_version: is only allowed with description")
+			return domain.CardEdit{}, invalid("base_description_version: is only allowed with description")
 		}
 		return edit, nil
 	}
 	if err := domain.ValidateDescription(*p.Description); err != nil {
-		return storage.CardEdit{}, err
+		return domain.CardEdit{}, err
 	}
 	if err := requireVersion("base_description_version", p.BaseDescriptionVersion); err != nil {
-		return storage.CardEdit{}, err
+		return domain.CardEdit{}, err
 	}
 	edit.Description = p.Description
 	return edit, nil
@@ -179,10 +178,10 @@ func (a *applier) cardArchive(ctx context.Context, p *protocol.CardArchive) erro
 
 func (a *applier) cardRanks(columnID uuid.UUID) rankScope {
 	return rankScope{
-		load: func(ctx context.Context) ([]storage.RankedItem, error) {
+		load: func(ctx context.Context) ([]domain.RankedItem, error) {
 			return a.btx.CardRanks(ctx, columnID)
 		},
-		rerank: func(ctx context.Context, items []storage.RankedItem) error {
+		rerank: func(ctx context.Context, items []domain.RankedItem) error {
 			return a.btx.RerankCards(ctx, columnID, items)
 		},
 		announce: func(ctx context.Context, pl placement) error {

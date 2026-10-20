@@ -7,13 +7,13 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/rank"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 type placement struct {
 	rank      string
-	rebalance []storage.RankedItem
+	rebalance []domain.RankedItem
 }
 
 func anchor(id *uuid.UUID) uuid.UUID {
@@ -23,7 +23,7 @@ func anchor(id *uuid.UUID) uuid.UUID {
 	return *id
 }
 
-func indexOf(items []storage.RankedItem, id uuid.UUID) int {
+func indexOf(items []domain.RankedItem, id uuid.UUID) int {
 	if id == uuid.Nil {
 		return -1
 	}
@@ -35,7 +35,7 @@ func indexOf(items []storage.RankedItem, id uuid.UUID) int {
 	return -1
 }
 
-func insertPosition(others []storage.RankedItem, after, before uuid.UUID) int {
+func insertPosition(others []domain.RankedItem, after, before uuid.UUID) int {
 	if i := indexOf(others, after); i >= 0 {
 		return i + 1
 	}
@@ -45,7 +45,7 @@ func insertPosition(others []storage.RankedItem, after, before uuid.UUID) int {
 	return len(others)
 }
 
-func place(current []storage.RankedItem, self uuid.UUID, after, before *uuid.UUID) (placement, error) {
+func place(current []domain.RankedItem, self uuid.UUID, after, before *uuid.UUID) (placement, error) {
 	if anchor(after) == self {
 		return placement{}, invalid("after_id: must not reference the item itself")
 	}
@@ -59,9 +59,9 @@ func place(current []storage.RankedItem, self uuid.UUID, after, before *uuid.UUI
 	if err != nil {
 		return placement{}, fmt.Errorf("rebalance ranks: %w", err)
 	}
-	respaced := make([]storage.RankedItem, len(current))
+	respaced := make([]domain.RankedItem, len(current))
 	for i, it := range current {
-		respaced[i] = storage.RankedItem{ID: it.ID, Rank: keys[i]}
+		respaced[i] = domain.RankedItem{ID: it.ID, Rank: keys[i]}
 	}
 	r, ok := rankAt(respaced, self, after, before)
 	if !ok {
@@ -70,8 +70,8 @@ func place(current []storage.RankedItem, self uuid.UUID, after, before *uuid.UUI
 	return placement{rank: r, rebalance: respaced}, nil
 }
 
-func rankAt(current []storage.RankedItem, self uuid.UUID, after, before *uuid.UUID) (string, bool) {
-	others := make([]storage.RankedItem, 0, len(current))
+func rankAt(current []domain.RankedItem, self uuid.UUID, after, before *uuid.UUID) (string, bool) {
+	others := make([]domain.RankedItem, 0, len(current))
 	for _, it := range current {
 		if it.ID != self {
 			others = append(others, it)
@@ -93,8 +93,8 @@ func rankAt(current []storage.RankedItem, self uuid.UUID, after, before *uuid.UU
 }
 
 type rankScope struct {
-	load     func(context.Context) ([]storage.RankedItem, error)
-	rerank   func(context.Context, []storage.RankedItem) error
+	load     func(context.Context) ([]domain.RankedItem, error)
+	rerank   func(context.Context, []domain.RankedItem) error
 	announce func(context.Context, placement) error
 }
 

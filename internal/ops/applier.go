@@ -84,7 +84,7 @@ func (a *applier) emitExtra(ctx context.Context, eventType string, payload any) 
 }
 
 func (a *applier) appendEvent(ctx context.Context, eventType string, payload any, opID *uuid.UUID) (domain.Event, error) {
-	return a.btx.AppendEvent(ctx, storage.EventInput{
+	return a.btx.AppendEvent(ctx, domain.EventDraft{
 		Type:    eventType,
 		Payload: payload,
 		OpID:    opID,

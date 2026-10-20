@@ -47,7 +47,7 @@ func saveOutcome(ctx context.Context, btx *storage.BoardTx, opID, userID uuid.UU
 	return saved, nil
 }
 
-func replay(ctx context.Context, btx *storage.BoardTx, prev storage.ProcessedOp, userID uuid.UUID) (Outcome, error) {
+func replay(ctx context.Context, btx *storage.BoardTx, prev domain.ProcessedOp, userID uuid.UUID) (Outcome, error) {
 	if prev.BoardID != btx.Board().ID || prev.UserID != userID {
 		return transientNack(btx, opIDTaken()), nil
 	}

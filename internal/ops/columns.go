@@ -7,7 +7,6 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/storage"
 )
 
 func (a *applier) columnCreate(ctx context.Context, p *protocol.ColumnCreate) error {
@@ -26,7 +25,7 @@ func (a *applier) columnCreate(ctx context.Context, p *protocol.ColumnCreate) er
 		return err
 	}
 	col, err := a.btx.InsertColumn(ctx, domain.Column{ID: p.ColumnID, Title: title, Rank: pl.rank})
-	if errors.Is(err, storage.ErrDuplicateID) {
+	if errors.Is(err, domain.ErrDuplicateID) {
 		return idUnavailable("column_id")
 	}
 	if err != nil {

@@ -6,28 +6,22 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
-type ProcessedOp struct {
-	OpID    uuid.UUID
-	BoardID uuid.UUID
-	UserID  uuid.UUID
-	Outcome json.RawMessage
-}
-
-func (b *BoardTx) ProcessedOp(ctx context.Context, opID uuid.UUID) (ProcessedOp, bool, error) {
-	var p ProcessedOp
+func (b *BoardTx) ProcessedOp(ctx context.Context, opID uuid.UUID) (domain.ProcessedOp, bool, error) {
+	var p domain.ProcessedOp
 	var outcome []byte
 	err := b.tx.QueryRow(ctx,
 		`SELECT op_id, board_id, user_id, outcome FROM processed_ops WHERE op_id = $1`,
 		opID).Scan(&p.OpID, &p.BoardID, &p.UserID, &outcome)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ProcessedOp{}, false, nil
+		return domain.ProcessedOp{}, false, nil
 	}
 	if err != nil {
-		return ProcessedOp{}, false, err
+		return domain.ProcessedOp{}, false, err
 	}
 	p.Outcome = outcome
 	return p, true, nil

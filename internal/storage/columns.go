@@ -31,7 +31,7 @@ func (b *BoardTx) ColumnIDExists(ctx context.Context, id uuid.UUID) (bool, error
 	return exists, err
 }
 
-func (b *BoardTx) ColumnRanks(ctx context.Context) ([]RankedItem, error) {
+func (b *BoardTx) ColumnRanks(ctx context.Context) ([]domain.RankedItem, error) {
 	return queryAll(ctx, b.tx, scanRankedItem,
 		`SELECT id, rank FROM columns WHERE board_id = $1 AND archived_at IS NULL ORDER BY rank, id`,
 		b.board.ID)
@@ -87,7 +87,7 @@ func (b *BoardTx) archiveColumnCards(ctx context.Context, columnID, actorID uuid
 		columnID, b.board.ID, actorID)
 }
 
-func (b *BoardTx) RerankColumns(ctx context.Context, items []RankedItem) error {
+func (b *BoardTx) RerankColumns(ctx context.Context, items []domain.RankedItem) error {
 	if len(items) == 0 {
 		return nil
 	}

@@ -22,7 +22,7 @@ func TestAppendEventTimestampsFollowSeqWithinTransaction(t *testing.T) {
 	var events []domain.Event
 	err := store.WithBoardLock(context.Background(), b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
 		for range 3 {
-			ev, err := btx.AppendEvent(ctx, storage.EventInput{Type: "t.tick"})
+			ev, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "t.tick"})
 			if err != nil {
 				return err
 			}

@@ -3,22 +3,18 @@ package storage
 import (
 	"fmt"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
-type RankedItem struct {
-	ID   uuid.UUID
-	Rank string
-}
-
-func scanRankedItem(row pgx.Row) (RankedItem, error) {
-	var it RankedItem
+func scanRankedItem(row pgx.Row) (domain.RankedItem, error) {
+	var it domain.RankedItem
 	err := row.Scan(&it.ID, &it.Rank)
 	return it, err
 }
 
-func splitRanked(items []RankedItem) ([]uuid.UUID, []string) {
+func splitRanked(items []domain.RankedItem) ([]uuid.UUID, []string) {
 	ids := make([]uuid.UUID, len(items))
 	ranks := make([]string, len(items))
 	for i, it := range items {

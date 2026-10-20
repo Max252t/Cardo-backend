@@ -13,13 +13,6 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
-type EventInput struct {
-	Type    string
-	Payload any
-	OpID    *uuid.UUID
-	ActorID *uuid.UUID
-}
-
 type BoardTxFunc func(ctx context.Context, btx *BoardTx) error
 
 type BoardTx struct {
@@ -87,7 +80,7 @@ func (b *BoardTx) RequireRole(ctx context.Context, userID uuid.UUID, min domain.
 	return role, nil
 }
 
-func (b *BoardTx) AppendEvent(ctx context.Context, in EventInput) (domain.Event, error) {
+func (b *BoardTx) AppendEvent(ctx context.Context, in domain.EventDraft) (domain.Event, error) {
 	if in.Type == "" {
 		return domain.Event{}, errors.New("event type is required")
 	}
