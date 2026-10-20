@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/pubsub"
 )
 
 const MaxEventsPerPage = 1000
@@ -24,13 +24,13 @@ type Store interface {
 
 type Service struct {
 	store     Store
-	publisher pubsub.Publisher
+	publisher boardevents.Publisher
 	logger    *slog.Logger
 }
 
 type Option func(*Service)
 
-func WithPublisher(p pubsub.Publisher) Option {
+func WithPublisher(p boardevents.Publisher) Option {
 	return func(s *Service) {
 		if p != nil {
 			s.publisher = p
@@ -47,7 +47,7 @@ func WithLogger(l *slog.Logger) Option {
 }
 
 func NewService(store Store, opts ...Option) *Service {
-	s := &Service{store: store, publisher: pubsub.Nop{}, logger: slog.New(slog.DiscardHandler)}
+	s := &Service{store: store, publisher: boardevents.Nop{}, logger: slog.New(slog.DiscardHandler)}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -132,7 +132,7 @@ func (s *Service) Delete(ctx context.Context, userID, boardID uuid.UUID) (domain
 }
 
 func (s *Service) publish(ctx context.Context, ev domain.Event) {
-	pubsub.PublishDetached(ctx, s.publisher, s.logger, "publish board event failed", []domain.Event{ev},
+	boardevents.PublishDetached(ctx, s.publisher, s.logger, "publish board event failed", []domain.Event{ev},
 		slog.String("board_id", ev.BoardID.String()),
 		slog.Int64("seq", ev.Seq),
 	)

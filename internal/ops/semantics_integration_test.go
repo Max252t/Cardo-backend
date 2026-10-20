@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/rank"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 )
@@ -605,7 +605,7 @@ func TestPublisherRunsAfterCommitAndSeesDurableEvents(t *testing.T) {
 		seqs    []int64
 		visible int
 	}
-	pub := pubsub.PublisherFunc(func(ctx context.Context, events []domain.Event) error {
+	pub := boardevents.PublisherFunc(func(ctx context.Context, events []domain.Event) error {
 		var visible int
 		err := f.pool.QueryRow(ctx, `SELECT count(*) FROM board_events WHERE board_id = $1 AND seq = ANY($2)`, f.board.ID, seqsOf(events)).Scan(&visible)
 		require.NoError(t, err)
@@ -696,7 +696,7 @@ func TestPublisherFailureDoesNotFailTheOperation(t *testing.T) {
 	var calls int
 	var logs strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	pub := pubsub.PublisherFunc(func(ctx context.Context, _ []domain.Event) error {
+	pub := boardevents.PublisherFunc(func(ctx context.Context, _ []domain.Event) error {
 		calls++
 		assert.NoError(t, ctx.Err())
 		return errors.New("redis down")
@@ -723,7 +723,7 @@ func TestPublisherGetsAContextThatSurvivesCancellation(t *testing.T) {
 	f := newFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var ctxErr error
-	pub := pubsub.PublisherFunc(func(pctx context.Context, _ []domain.Event) error {
+	pub := boardevents.PublisherFunc(func(pctx context.Context, _ []domain.Event) error {
 		cancel()
 		ctxErr = pctx.Err()
 		return nil

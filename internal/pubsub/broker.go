@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -21,6 +22,8 @@ type Broker interface {
 	Messages() <-chan Message
 	Close() error
 }
+
+var _ boardevents.Publisher = (*EventPublisher)(nil)
 
 type EventPublisher struct {
 	broker Broker

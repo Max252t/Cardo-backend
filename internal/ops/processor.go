@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
-	"github.com/Max252t/Cardo-backend/internal/pubsub"
 )
 
 type Store interface {
@@ -36,13 +36,13 @@ func (o Outcome) Events() []domain.Event {
 
 type Processor struct {
 	store     Store
-	publisher pubsub.Publisher
+	publisher boardevents.Publisher
 	logger    *slog.Logger
 }
 
 type Option func(*Processor)
 
-func WithPublisher(p pubsub.Publisher) Option {
+func WithPublisher(p boardevents.Publisher) Option {
 	return func(pr *Processor) {
 		if p != nil {
 			pr.publisher = p
@@ -61,7 +61,7 @@ func WithLogger(l *slog.Logger) Option {
 func NewProcessor(store Store, opts ...Option) *Processor {
 	p := &Processor{
 		store:     store,
-		publisher: pubsub.Nop{},
+		publisher: boardevents.Nop{},
 		logger:    slog.New(slog.DiscardHandler),
 	}
 	for _, opt := range opts {
@@ -85,7 +85,7 @@ func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op pro
 	}
 	if out.Event != nil && !out.Replayed {
 		events := out.Events()
-		pubsub.PublishDetached(ctx, p.publisher, p.logger, "publish board events failed", events,
+		boardevents.PublishDetached(ctx, p.publisher, p.logger, "publish board events failed", events,
 			slog.String("board_id", boardID.String()),
 			slog.String("op_id", op.OpID.String()),
 			slog.Int64("seq", events[0].Seq),
