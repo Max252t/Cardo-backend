@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Max252t/Cardo-backend/internal/presence"
+	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
@@ -66,7 +67,7 @@ func (r *recorder) types() []string {
 
 type fixture struct {
 	clock *fakeClock
-	store *presence.MemoryStore
+	store *presencestore.MemoryStore
 	rec   *recorder
 	a, b  *presence.Service
 	board uuid.UUID
@@ -74,7 +75,7 @@ type fixture struct {
 
 func newFixture() *fixture {
 	clock := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
-	store := presence.NewMemoryStore()
+	store := presencestore.NewMemoryStore()
 	rec := &recorder{}
 	return &fixture{
 		clock: clock,

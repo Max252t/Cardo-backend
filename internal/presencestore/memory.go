@@ -1,4 +1,4 @@
-package presence
+package presencestore
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
@@ -100,3 +101,8 @@ func (m *MemoryStore) DeleteProfiles(_ context.Context, boardID uuid.UUID, ids .
 	}
 	return nil
 }
+
+var (
+	_ presence.Store = (*MemoryStore)(nil)
+	_ presence.Store = (*RedisStore)(nil)
+)

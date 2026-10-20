@@ -16,6 +16,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/presence"
+	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
 )
@@ -25,7 +26,7 @@ var jwtSecret = []byte("0123456789abcdef0123456789abcdef")
 type Env struct {
 	Clock    *FakeClock
 	Network  *pubsub.MemoryNetwork
-	Presence *presence.MemoryStore
+	Presence *presencestore.MemoryStore
 	Tokens   *auth.JWTManager
 	Board    *Board
 	Config   realtime.Config
@@ -43,7 +44,7 @@ func NewEnv(t testing.TB) *Env {
 	return &Env{
 		Clock:    clock,
 		Network:  network,
-		Presence: presence.NewMemoryStore(),
+		Presence: presencestore.NewMemoryStore(),
 		Tokens: auth.NewJWTManager(auth.JWTConfig{
 			Secret:   jwtSecret,
 			Issuer:   "test",

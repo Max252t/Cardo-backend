@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Max252t/Cardo-backend/internal/presence"
+	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 )
@@ -22,7 +23,7 @@ func TestRedisStoreBacksTheServiceAcrossInstances(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
 	rec := &recorder{}
 	a := presence.New(store, rec, clock, "a")
@@ -52,7 +53,7 @@ func TestRedisStoreSweepsStaleMembers(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
 	rec := &recorder{}
 	svc := presence.New(store, rec, clock, "a")

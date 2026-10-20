@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Max252t/Cardo-backend/internal/presence"
+	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 )
@@ -17,7 +18,7 @@ import (
 func TestRedisStoreFreshAndStaleBoundaries(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx := context.Background()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	board := uuid.New()
 	base := time.UnixMilli(1_900_000_000_000)
 
@@ -45,7 +46,7 @@ func TestRedisStoreFreshAndStaleBoundaries(t *testing.T) {
 func TestRedisStorePutRefreshesTheScoreOfAnExistingMember(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx := context.Background()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	board := uuid.New()
 	base := time.UnixMilli(1_900_000_000_000)
 
@@ -62,7 +63,7 @@ func TestRedisStorePutRefreshesTheScoreOfAnExistingMember(t *testing.T) {
 func TestRedisStoreRemoveAndBoardIsolation(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx := context.Background()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	boardA, boardB := uuid.New(), uuid.New()
 	now := time.UnixMilli(1_900_000_000_000)
 
@@ -86,7 +87,7 @@ func TestRedisStoreRemoveAndBoardIsolation(t *testing.T) {
 func TestRedisStoreKeysCarryAnExpiry(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx := context.Background()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	board := uuid.New()
 	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
 
@@ -96,14 +97,14 @@ func TestRedisStoreKeysCarryAnExpiry(t *testing.T) {
 		ttl, err := client.TTL(ctx, key).Result()
 		require.NoError(t, err)
 		assert.Greater(t, ttl, time.Duration(0), key)
-		assert.LessOrEqual(t, ttl, presence.DefaultKeyTTL, key)
+		assert.LessOrEqual(t, ttl, presencestore.DefaultKeyTTL, key)
 	}
 }
 
 func TestRedisStoreProfiles(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx := context.Background()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	board := uuid.New()
 	ann := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
 	bob := protocol.PresenceUser{ID: uuid.New(), Name: "Bob", AvatarColor: "#445566"}
@@ -134,7 +135,7 @@ func TestRedisStoreSweepsADeadInstanceButKeepsTheSameUserOnAnotherInstance(t *te
 	client := testutil.NewRedis(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
 	rec := &recorder{}
 	dead := presence.New(store, rec, clock, "dead")
@@ -165,7 +166,7 @@ func TestRedisStoreSweepsADeadInstanceButKeepsTheSameUserOnAnotherInstance(t *te
 func TestRedisServiceOnlineIsSortedByName(t *testing.T) {
 	client := testutil.NewRedis(t)
 	ctx := context.Background()
-	store := presence.NewRedisStore(client)
+	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
 	svc := presence.New(store, &recorder{}, clock, "a")
 	board := uuid.New()

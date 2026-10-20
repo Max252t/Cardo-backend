@@ -12,6 +12,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/presence"
+	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
 	"github.com/Max252t/Cardo-backend/internal/storage"
@@ -63,8 +64,8 @@ func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client
 
 func newTransport(rdb *redis.Client, logger *slog.Logger) (pubsub.Broker, presence.Store) {
 	if rdb != nil {
-		return pubsub.NewRedisBroker(context.Background(), rdb), presence.NewRedisStore(rdb)
+		return pubsub.NewRedisBroker(context.Background(), rdb), presencestore.NewRedisStore(rdb)
 	}
 	logger.Warn("REDIS_URL is empty, using in-process pub/sub and presence, not suitable for multiple instances")
-	return pubsub.NewMemoryNetwork().NewBroker(), presence.NewMemoryStore()
+	return pubsub.NewMemoryNetwork().NewBroker(), presencestore.NewMemoryStore()
 }
