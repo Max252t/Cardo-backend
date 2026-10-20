@@ -1,4 +1,4 @@
-package auth_test
+package ratelimit_test
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
+	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 )
 
 func reserve(t *testing.T, l auth.LoginLimiter, key string) auth.Reservation {
@@ -31,7 +32,7 @@ func reserveN(t *testing.T, l auth.LoginLimiter, key string, n int) {
 
 func TestMemoryLimiterAllowsMaxAttemptsThenBlocks(t *testing.T) {
 	t.Parallel()
-	l := auth.NewMemoryLimiter(5, time.Minute, newFakeClock())
+	l := ratelimit.NewMemoryLimiter(5, time.Minute, newFakeClock())
 
 	for i := 1; i <= 5; i++ {
 		r := reserve(t, l, "k")
@@ -47,7 +48,7 @@ func TestMemoryLimiterAllowsMaxAttemptsThenBlocks(t *testing.T) {
 func TestMemoryLimiterRetryAfterIsRemainingWindow(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
-	l := auth.NewMemoryLimiter(1, time.Minute, clock)
+	l := ratelimit.NewMemoryLimiter(1, time.Minute, clock)
 
 	r := reserve(t, l, "k")
 	assert.Equal(t, time.Minute, r.RetryAfter)
@@ -59,7 +60,7 @@ func TestMemoryLimiterRetryAfterIsRemainingWindow(t *testing.T) {
 
 func TestMemoryLimiterKeysAreIndependent(t *testing.T) {
 	t.Parallel()
-	l := auth.NewMemoryLimiter(2, time.Minute, newFakeClock())
+	l := ratelimit.NewMemoryLimiter(2, time.Minute, newFakeClock())
 	reserveN(t, l, "a", 2)
 	assert.False(t, reserve(t, l, "a").Allowed)
 	assert.True(t, reserve(t, l, "b").Allowed)
@@ -68,7 +69,7 @@ func TestMemoryLimiterKeysAreIndependent(t *testing.T) {
 func TestMemoryLimiterWindowExpiry(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
-	l := auth.NewMemoryLimiter(3, time.Minute, clock)
+	l := ratelimit.NewMemoryLimiter(3, time.Minute, clock)
 
 	reserveN(t, l, "k", 3)
 	clock.Advance(59 * time.Second)
@@ -83,7 +84,7 @@ func TestMemoryLimiterWindowExpiry(t *testing.T) {
 func TestMemoryLimiterWindowIsFixedFromFirstAttempt(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
-	l := auth.NewMemoryLimiter(3, time.Minute, clock)
+	l := ratelimit.NewMemoryLimiter(3, time.Minute, clock)
 
 	reserve(t, l, "k")
 	clock.Advance(40 * time.Second)
@@ -96,7 +97,7 @@ func TestMemoryLimiterWindowIsFixedFromFirstAttempt(t *testing.T) {
 
 func TestMemoryLimiterResetClearsAttempts(t *testing.T) {
 	t.Parallel()
-	l := auth.NewMemoryLimiter(2, time.Minute, newFakeClock())
+	l := ratelimit.NewMemoryLimiter(2, time.Minute, newFakeClock())
 	reserveN(t, l, "k", 2)
 	require.NoError(t, l.Reset(context.Background(), "k"))
 	assert.Equal(t, 1, reserve(t, l, "k").Attempts)
@@ -105,7 +106,7 @@ func TestMemoryLimiterResetClearsAttempts(t *testing.T) {
 
 func TestMemoryLimiterNilClock(t *testing.T) {
 	t.Parallel()
-	l := auth.NewMemoryLimiter(1, time.Hour, nil)
+	l := ratelimit.NewMemoryLimiter(1, time.Hour, nil)
 	reserve(t, l, "k")
 	assert.False(t, reserve(t, l, "k").Allowed)
 }
@@ -113,7 +114,7 @@ func TestMemoryLimiterNilClock(t *testing.T) {
 func TestMemoryLimiterSweepsExpiredEntries(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
-	l := auth.NewMemoryLimiter(1, time.Minute, clock)
+	l := ratelimit.NewMemoryLimiter(1, time.Minute, clock)
 	for i := range 10000 {
 		reserve(t, l, fmt.Sprintf("k%d", i))
 	}
@@ -126,7 +127,7 @@ func TestMemoryLimiterSweepsExpiredEntries(t *testing.T) {
 func TestMemoryLimiterConcurrentReservationsAreBounded(t *testing.T) {
 	t.Parallel()
 	const maxAttempts = 5
-	l := auth.NewMemoryLimiter(maxAttempts, time.Minute, newFakeClock())
+	l := ratelimit.NewMemoryLimiter(maxAttempts, time.Minute, newFakeClock())
 	var (
 		wg      sync.WaitGroup
 		allowed atomic.Int32
@@ -150,10 +151,33 @@ func TestRedisLimiterReportsClientErrors(t *testing.T) {
 	t.Parallel()
 	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
 	require.NoError(t, client.Close())
-	l := auth.NewRedisLimiter(client, 5, time.Minute)
+	l := ratelimit.NewRedisLimiter(client, 5, time.Minute)
 
 	r, err := l.Reserve(context.Background(), "k")
 	require.Error(t, err)
 	assert.False(t, r.Allowed, "the limiter must fail closed when redis is unavailable")
 	assert.Error(t, l.Reset(context.Background(), "k"))
+}
+
+var testEpoch = time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: testEpoch}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
 }

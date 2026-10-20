@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
@@ -240,4 +242,18 @@ func concurrentLogins(svc *auth.Service, n int, in auth.LoginInput) map[error]in
 	close(start)
 	wg.Wait()
 	return results
+}
+
+func reserve(t *testing.T, l auth.LoginLimiter, key string) auth.Reservation {
+	t.Helper()
+	r, err := l.Reserve(context.Background(), key)
+	require.NoError(t, err)
+	return r
+}
+
+func reserveN(t *testing.T, l auth.LoginLimiter, key string, n int) {
+	t.Helper()
+	for range n {
+		reserve(t, l, key)
+	}
 }

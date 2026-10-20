@@ -13,6 +13,7 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 )
 
@@ -22,7 +23,7 @@ func redisKey() string {
 
 func TestRedisLimiterAllowsMaxAttemptsThenBlocks(t *testing.T) {
 	client := testutil.NewRedis(t)
-	l := auth.NewRedisLimiter(client, 5, time.Minute)
+	l := ratelimit.NewRedisLimiter(client, 5, time.Minute)
 	key := redisKey()
 
 	for i := 1; i <= 5; i++ {
@@ -38,7 +39,7 @@ func TestRedisLimiterAllowsMaxAttemptsThenBlocks(t *testing.T) {
 
 func TestRedisLimiterKeysAreIndependent(t *testing.T) {
 	client := testutil.NewRedis(t)
-	l := auth.NewRedisLimiter(client, 2, time.Minute)
+	l := ratelimit.NewRedisLimiter(client, 2, time.Minute)
 	a, b := redisKey(), redisKey()
 	reserveN(t, l, a, 2)
 	assert.False(t, reserve(t, l, a).Allowed)
@@ -47,7 +48,7 @@ func TestRedisLimiterKeysAreIndependent(t *testing.T) {
 
 func TestRedisLimiterReset(t *testing.T) {
 	client := testutil.NewRedis(t)
-	l := auth.NewRedisLimiter(client, 2, time.Minute)
+	l := ratelimit.NewRedisLimiter(client, 2, time.Minute)
 	key := redisKey()
 	reserveN(t, l, key, 3)
 
@@ -60,51 +61,51 @@ func TestRedisLimiterReset(t *testing.T) {
 func TestRedisLimiterTTLIsSetOnceFromFirstAttempt(t *testing.T) {
 	client := testutil.NewRedis(t)
 	window := 90 * time.Second
-	l := auth.NewRedisLimiter(client, 10, window)
+	l := ratelimit.NewRedisLimiter(client, 10, window)
 	key := redisKey()
 	ctx := context.Background()
 
 	reserve(t, l, key)
-	first, err := client.PTTL(ctx, auth.RedisLoginKeyPrefix+key).Result()
+	first, err := client.PTTL(ctx, ratelimit.RedisLoginKeyPrefix+key).Result()
 	require.NoError(t, err)
 	assert.Greater(t, first, time.Duration(0))
 	assert.LessOrEqual(t, first, window)
 
 	reserveN(t, l, key, 3)
-	second, err := client.PTTL(ctx, auth.RedisLoginKeyPrefix+key).Result()
+	second, err := client.PTTL(ctx, ratelimit.RedisLoginKeyPrefix+key).Result()
 	require.NoError(t, err)
 	assert.Greater(t, second, time.Duration(0))
 	assert.LessOrEqual(t, second, first, "later attempts must not extend the window")
 
-	n, err := client.Get(ctx, auth.RedisLoginKeyPrefix+key).Int()
+	n, err := client.Get(ctx, ratelimit.RedisLoginKeyPrefix+key).Int()
 	require.NoError(t, err)
 	assert.Equal(t, 4, n)
 }
 
 func TestRedisLimiterRestoresMissingTTL(t *testing.T) {
 	client := testutil.NewRedis(t)
-	l := auth.NewRedisLimiter(client, 10, time.Minute)
+	l := ratelimit.NewRedisLimiter(client, 10, time.Minute)
 	key := redisKey()
 	ctx := context.Background()
-	require.NoError(t, client.Set(ctx, auth.RedisLoginKeyPrefix+key, 3, 0).Err())
+	require.NoError(t, client.Set(ctx, ratelimit.RedisLoginKeyPrefix+key, 3, 0).Err())
 
 	r := reserve(t, l, key)
 	assert.Equal(t, 4, r.Attempts)
-	ttl, err := client.PTTL(ctx, auth.RedisLoginKeyPrefix+key).Result()
+	ttl, err := client.PTTL(ctx, ratelimit.RedisLoginKeyPrefix+key).Result()
 	require.NoError(t, err)
 	assert.Greater(t, ttl, time.Duration(0), "a key without TTL must not block forever")
 }
 
 func TestRedisLimiterWindowExpiry(t *testing.T) {
 	client := testutil.NewRedis(t)
-	l := auth.NewRedisLimiter(client, 2, time.Minute)
+	l := ratelimit.NewRedisLimiter(client, 2, time.Minute)
 	key := redisKey()
 	ctx := context.Background()
 
 	reserveN(t, l, key, 2)
-	require.NoError(t, client.PExpire(ctx, auth.RedisLoginKeyPrefix+key, time.Millisecond).Err())
+	require.NoError(t, client.PExpire(ctx, ratelimit.RedisLoginKeyPrefix+key, time.Millisecond).Err())
 	assert.Eventually(t, func() bool {
-		n, err := client.Exists(ctx, auth.RedisLoginKeyPrefix+key).Result()
+		n, err := client.Exists(ctx, ratelimit.RedisLoginKeyPrefix+key).Result()
 		return err == nil && n == 0
 	}, 5*time.Second, 5*time.Millisecond)
 
@@ -116,7 +117,7 @@ func TestRedisLimiterWindowExpiry(t *testing.T) {
 func TestRedisLimiterConcurrentReservationsAreBounded(t *testing.T) {
 	client := testutil.NewRedis(t)
 	const maxAttempts = 5
-	l := auth.NewRedisLimiter(client, maxAttempts, time.Minute)
+	l := ratelimit.NewRedisLimiter(client, maxAttempts, time.Minute)
 	key := redisKey()
 
 	var (
@@ -137,7 +138,7 @@ func TestRedisLimiterConcurrentReservationsAreBounded(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, int32(maxAttempts), allowed.Load())
 
-	n, err := client.Get(context.Background(), auth.RedisLoginKeyPrefix+key).Int()
+	n, err := client.Get(context.Background(), ratelimit.RedisLoginKeyPrefix+key).Int()
 	require.NoError(t, err)
 	assert.Equal(t, 50, n)
 }
@@ -151,7 +152,7 @@ func TestServiceConcurrentLoginsWithRedisLimiter(t *testing.T) {
 		Store:      f.store,
 		Hasher:     hasher,
 		Access:     f.jwt,
-		Limiter:    auth.NewRedisLimiter(client, 5, time.Minute),
+		Limiter:    ratelimit.NewRedisLimiter(client, 5, time.Minute),
 		Clock:      f.clock,
 		RefreshTTL: refreshTTL,
 	})
@@ -170,7 +171,7 @@ func TestServiceLoginWithRedisLimiterSixthAttempt(t *testing.T) {
 		Store:      f.store,
 		Hasher:     auth.NewArgon2Hasher(fastArgon2),
 		Access:     f.jwt,
-		Limiter:    auth.NewRedisLimiter(client, 5, time.Minute),
+		Limiter:    ratelimit.NewRedisLimiter(client, 5, time.Minute),
 		Clock:      f.clock,
 		RefreshTTL: refreshTTL,
 	})

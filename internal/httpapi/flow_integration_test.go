@@ -22,6 +22,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
+	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 	"github.com/Max252t/Cardo-backend/internal/users"
@@ -71,11 +72,11 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 	pool := testutil.NewMigratedPool(t)
 	store := storage.New(pool)
 	clock := &flowClock{now: time.Now()}
-	var limiter auth.LoginLimiter = auth.NewMemoryLimiter(5, time.Minute, clock)
+	var limiter auth.LoginLimiter = ratelimit.NewMemoryLimiter(5, time.Minute, clock)
 	readiness := map[string]httpapi.Checker{"postgres": store}
 	if withRedis {
 		redisClient := testutil.NewRedis(t)
-		limiter = auth.NewRedisLimiter(redisClient, 5, time.Minute)
+		limiter = ratelimit.NewRedisLimiter(redisClient, 5, time.Minute)
 		readiness["redis"] = httpapi.CheckerFunc(func(ctx context.Context) error { return redisClient.Ping(ctx).Err() })
 	}
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 )
 
 const refreshTTL = 7 * 24 * time.Hour
@@ -20,7 +21,7 @@ type fixture struct {
 	svc     *auth.Service
 	store   *fakeStore
 	clock   *fakeClock
-	limiter *auth.MemoryLimiter
+	limiter *ratelimit.MemoryLimiter
 	jwt     *auth.JWTManager
 	hasher  *auth.Argon2Hasher
 }
@@ -29,7 +30,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	clock := newFakeClock()
 	store := newFakeStore()
-	limiter := auth.NewMemoryLimiter(5, time.Minute, clock)
+	limiter := ratelimit.NewMemoryLimiter(5, time.Minute, clock)
 	jwtm := newJWT(clock)
 	hasher := auth.NewArgon2Hasher(fastArgon2)
 	svc := auth.NewService(auth.Deps{
@@ -470,7 +471,7 @@ func TestNewServiceDefaults(t *testing.T) {
 		Store:      store,
 		Hasher:     auth.NewArgon2Hasher(fastArgon2),
 		Access:     newJWT(nil),
-		Limiter:    auth.NewMemoryLimiter(5, time.Minute, nil),
+		Limiter:    ratelimit.NewMemoryLimiter(5, time.Minute, nil),
 		RefreshTTL: time.Hour,
 	})
 	s, err := svc.Register(context.Background(), auth.RegisterInput{Email: "a@b.co", Password: "password1", DisplayName: "A"})
@@ -488,7 +489,7 @@ func TestLoginConcurrentAttemptsCannotBypassLimiter(t *testing.T) {
 		Store:      f.store,
 		Hasher:     hasher,
 		Access:     f.jwt,
-		Limiter:    auth.NewMemoryLimiter(5, time.Minute, f.clock),
+		Limiter:    ratelimit.NewMemoryLimiter(5, time.Minute, f.clock),
 		Clock:      f.clock,
 		RefreshTTL: refreshTTL,
 	})
@@ -521,7 +522,7 @@ func TestLoginHasherOverloadPropagates(t *testing.T) {
 		Store:      f.store,
 		Hasher:     overloadedHasher{},
 		Access:     f.jwt,
-		Limiter:    auth.NewMemoryLimiter(5, time.Minute, f.clock),
+		Limiter:    ratelimit.NewMemoryLimiter(5, time.Minute, f.clock),
 		Clock:      f.clock,
 		RefreshTTL: refreshTTL,
 	})

@@ -20,6 +20,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
+	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/users"
 )
@@ -147,9 +148,9 @@ func closeRedis(rdb *redis.Client, logger *slog.Logger) {
 func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) auth.LoginLimiter {
 	if cfg.LoginLimiter == config.LoginLimiterMemory || rdb == nil {
 		logger.Warn("using per-instance in-memory login rate limiter, not suitable for multiple instances")
-		return auth.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
+		return ratelimit.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
 	}
-	return auth.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)
+	return ratelimit.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)
 }
 
 type lifecycle struct {
