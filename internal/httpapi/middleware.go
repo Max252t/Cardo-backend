@@ -104,20 +104,32 @@ func bodyLimitMiddleware(limit int64) gin.HandlerFunc {
 	}
 }
 
+func (h *handlers) bearerToken(c *gin.Context) (string, bool) {
+	header := c.GetHeader("Authorization")
+	scheme, token, found := strings.Cut(header, " ")
+	token = strings.TrimSpace(token)
+	if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
+		c.Header("WWW-Authenticate", authChallenge)
+		abortWithError(c, http.StatusUnauthorized, CodeUnauthorized, "missing bearer token")
+		return "", false
+	}
+	return token, true
+}
+
+func (h *handlers) rejectToken(c *gin.Context, err error) {
+	c.Header("WWW-Authenticate", authChallenge+`, error="invalid_token"`)
+	h.fail(c, err)
+}
+
 func (h *handlers) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		header := c.GetHeader("Authorization")
-		scheme, token, found := strings.Cut(header, " ")
-		token = strings.TrimSpace(token)
-		if !found || !strings.EqualFold(scheme, "Bearer") || token == "" {
-			c.Header("WWW-Authenticate", authChallenge)
-			abortWithError(c, http.StatusUnauthorized, CodeUnauthorized, "missing bearer token")
+		token, ok := h.bearerToken(c)
+		if !ok {
 			return
 		}
 		userID, err := h.tokens.Verify(token)
 		if err != nil {
-			c.Header("WWW-Authenticate", authChallenge+`, error="invalid_token"`)
-			h.fail(c, err)
+			h.rejectToken(c, err)
 			return
 		}
 		c.Set(ctxUserID, userID)

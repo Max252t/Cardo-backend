@@ -65,6 +65,8 @@ type Deps struct {
 	Clock          Clock
 	TrustedProxies []string
 	MaxBodyBytes   int64
+	Claims         ClaimsParser
+	Sockets        BoardSockets
 }
 
 type handlers struct {
@@ -76,6 +78,8 @@ type handlers struct {
 	readiness    map[string]Checker
 	shuttingDown func() bool
 	clock        Clock
+	claims       ClaimsParser
+	sockets      BoardSockets
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -94,6 +98,8 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		readiness:    d.Readiness,
 		shuttingDown: d.ShuttingDown,
 		clock:        d.Clock,
+		claims:       d.Claims,
+		sockets:      d.Sockets,
 	}
 
 	r := gin.New()
@@ -146,4 +152,8 @@ func (h *handlers) registerRoutes(r *gin.Engine) {
 	user.GET("/boards/:"+boardIDParam, h.getBoard)
 	user.DELETE("/boards/:"+boardIDParam, h.deleteBoard)
 	user.GET("/boards/:"+boardIDParam+"/events", h.boardEvents)
+
+	if h.sockets != nil && h.claims != nil {
+		r.GET("/ws/boards/:"+boardIDParam, h.connectBoardSocket)
+	}
 }
