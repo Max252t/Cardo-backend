@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,14 +29,9 @@ type BoardTx struct {
 
 func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn BoardTxFunc) error {
 	err := s.InTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, durationMillis(s.lockTimeout)); err != nil {
-			return fmt.Errorf("set lock timeout: %w", err)
-		}
-		board, err := scanBoard(tx.QueryRow(ctx,
-			`SELECT `+boardColumns+` FROM boards b WHERE b.id = $1 AND b.deleted_at IS NULL FOR UPDATE`,
-			boardID))
+		board, err := lockBoard(ctx, tx, boardID, s.lockTimeout)
 		if err != nil {
-			return noRowsAsNotFound(err)
+			return err
 		}
 		return fn(ctx, &BoardTx{tx: tx, board: board})
 	})
@@ -112,8 +108,8 @@ func (b *BoardTx) AppendEvent(ctx context.Context, in EventInput) (domain.Event,
 		ActorID: in.ActorID,
 	}
 	if err := b.tx.QueryRow(ctx,
-		`INSERT INTO board_events (board_id, seq, type, payload, op_id, actor_id)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO board_events (board_id, seq, type, payload, op_id, actor_id, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp())
 		 RETURNING created_at`,
 		ev.BoardID, ev.Seq, ev.Type, []byte(ev.Payload), ev.OpID, ev.ActorID).Scan(&ev.CreatedAt); err != nil {
 		return domain.Event{}, fmt.Errorf("insert board event: %w", err)
@@ -125,7 +121,7 @@ func (b *BoardTx) AppendEvent(ctx context.Context, in EventInput) (domain.Event,
 func (b *BoardTx) nextSeq(ctx context.Context) (int64, error) {
 	var seq int64
 	if err := b.tx.QueryRow(ctx,
-		`UPDATE boards SET seq = seq + 1, updated_at = now() WHERE id = $1 RETURNING seq, updated_at`,
+		`UPDATE boards SET seq = seq + 1, updated_at = clock_timestamp() WHERE id = $1 RETURNING seq, updated_at`,
 		b.board.ID).Scan(&seq, &b.board.UpdatedAt); err != nil {
 		return 0, fmt.Errorf("increment board seq: %w", err)
 	}
@@ -134,13 +130,13 @@ func (b *BoardTx) nextSeq(ctx context.Context) (int64, error) {
 
 func (b *BoardTx) SetTitle(ctx context.Context, title string) error {
 	return b.tx.QueryRow(ctx,
-		`UPDATE boards SET title = $2, updated_at = now() WHERE id = $1 RETURNING title, updated_at`,
+		`UPDATE boards SET title = $2, updated_at = clock_timestamp() WHERE id = $1 RETURNING title, updated_at`,
 		b.board.ID, title).Scan(&b.board.Title, &b.board.UpdatedAt)
 }
 
 func (b *BoardTx) MarkDeleted(ctx context.Context) error {
 	return b.tx.QueryRow(ctx,
-		`UPDATE boards SET deleted_at = now(), updated_at = now() WHERE id = $1 RETURNING deleted_at, updated_at`,
+		`UPDATE boards SET deleted_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = $1 RETURNING deleted_at, updated_at`,
 		b.board.ID).Scan(&b.board.DeletedAt, &b.board.UpdatedAt)
 }
 
@@ -159,4 +155,24 @@ func marshalPayload(p any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("marshal event payload: %w", err)
 	}
 	return data, nil
+}
+
+func lockBoard(ctx context.Context, tx pgx.Tx, boardID uuid.UUID, lockTimeout time.Duration) (board domain.Board, err error) {
+	batch := &pgx.Batch{}
+	batch.Queue(`SELECT set_config('lock_timeout', $1, true)`, durationMillis(lockTimeout))
+	batch.Queue(`SELECT `+boardColumns+` FROM boards b WHERE b.id = $1 AND b.deleted_at IS NULL FOR UPDATE`, boardID)
+	results := tx.SendBatch(ctx, batch)
+	defer func() {
+		if closeErr := results.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+	if _, err := results.Exec(); err != nil {
+		return domain.Board{}, fmt.Errorf("set lock timeout: %w", err)
+	}
+	board, err = scanBoard(results.QueryRow())
+	if err != nil {
+		return domain.Board{}, noRowsAsNotFound(err)
+	}
+	return board, nil
 }

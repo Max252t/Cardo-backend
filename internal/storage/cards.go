@@ -45,8 +45,8 @@ func (b *BoardTx) CardRanks(ctx context.Context, columnID uuid.UUID) ([]RankedIt
 
 func (b *BoardTx) InsertCard(ctx context.Context, c domain.Card) (domain.Card, error) {
 	return scanCard(b.tx.QueryRow(ctx,
-		`INSERT INTO cards (id, board_id, column_id, title, description, rank, created_by, updated_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+		`INSERT INTO cards (id, board_id, column_id, title, description, rank, created_by, updated_by, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $7, clock_timestamp(), clock_timestamp())
 		 RETURNING `+cardColumns,
 		c.ID, b.board.ID, c.ColumnID, c.Title, c.Description, c.Rank, c.CreatedBy))
 }
@@ -59,7 +59,7 @@ func (b *BoardTx) EditCard(ctx context.Context, id, actorID uuid.UUID, edit Card
 		   description_version = description_version + CASE WHEN $5::text IS NULL THEN 0 ELSE 1 END,
 		   version = version + 1,
 		   updated_by = $3,
-		   updated_at = now()
+		   updated_at = clock_timestamp()
 		 WHERE `+activeByIDInBoard+`
 		 RETURNING `+cardColumns,
 		id, b.board.ID, actorID, edit.Title, edit.Description))
@@ -68,7 +68,7 @@ func (b *BoardTx) EditCard(ctx context.Context, id, actorID uuid.UUID, edit Card
 
 func (b *BoardTx) MoveCard(ctx context.Context, id, actorID, toColumnID uuid.UUID, rank string) (domain.Card, error) {
 	c, err := scanCard(b.tx.QueryRow(ctx,
-		`UPDATE cards SET column_id = $4, rank = $5, version = version + 1, updated_by = $3, updated_at = now()
+		`UPDATE cards SET column_id = $4, rank = $5, version = version + 1, updated_by = $3, updated_at = clock_timestamp()
 		 WHERE `+activeByIDInBoard+`
 		 RETURNING `+cardColumns,
 		id, b.board.ID, actorID, toColumnID, rank))
@@ -77,7 +77,7 @@ func (b *BoardTx) MoveCard(ctx context.Context, id, actorID, toColumnID uuid.UUI
 
 func (b *BoardTx) ArchiveCard(ctx context.Context, id, actorID uuid.UUID) (domain.Card, error) {
 	c, err := scanCard(b.tx.QueryRow(ctx,
-		`UPDATE cards SET archived_at = now(), version = version + 1, updated_by = $3, updated_at = now()
+		`UPDATE cards SET archived_at = clock_timestamp(), version = version + 1, updated_by = $3, updated_at = clock_timestamp()
 		 WHERE `+activeByIDInBoard+`
 		 RETURNING `+cardColumns,
 		id, b.board.ID, actorID))

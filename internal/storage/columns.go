@@ -64,7 +64,7 @@ func (b *BoardTx) MoveColumn(ctx context.Context, id uuid.UUID, rank string) (do
 
 func (b *BoardTx) ArchiveColumn(ctx context.Context, id, actorID uuid.UUID) (domain.Column, []uuid.UUID, error) {
 	c, err := scanColumn(b.tx.QueryRow(ctx,
-		`UPDATE columns SET archived_at = now(), version = version + 1
+		`UPDATE columns SET archived_at = clock_timestamp(), version = version + 1
 		 WHERE `+activeByIDInBoard+`
 		 RETURNING `+columnColumns,
 		id, b.board.ID))
@@ -80,7 +80,7 @@ func (b *BoardTx) ArchiveColumn(ctx context.Context, id, actorID uuid.UUID) (dom
 
 func (b *BoardTx) archiveColumnCards(ctx context.Context, columnID, actorID uuid.UUID) ([]uuid.UUID, error) {
 	return queryAll(ctx, b.tx, scanUUID,
-		`UPDATE cards SET archived_at = now(), updated_at = now(), updated_by = $3, version = version + 1
+		`UPDATE cards SET archived_at = clock_timestamp(), updated_at = clock_timestamp(), updated_by = $3, version = version + 1
 		 WHERE column_id = $1 AND board_id = $2 AND archived_at IS NULL
 		 RETURNING id`,
 		columnID, b.board.ID, actorID)
