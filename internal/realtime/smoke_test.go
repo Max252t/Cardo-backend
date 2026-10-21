@@ -581,48 +581,6 @@ func TestMissingHelloClosesConnection(t *testing.T) {
 	assert.Equal(t, protocol.CloseProtocolError, c.ExpectClose().Code)
 }
 
-func TestMissedPongsCloseConnection(t *testing.T) {
-	t.Parallel()
-	env := rttest.NewEnv(t)
-	env.Config = realtime.Config{PingInterval: 30 * time.Second, PongWait: 60 * time.Second}
-	ann := rttest.AddUser(env, "Ann", domain.RoleEditor)
-	inst := env.StartInstance(t, "a")
-	c := inst.Dial(t, ann)
-	c.HandshakeSnapshot()
-	waitTimers(t, env, 2)
-
-	pings := make(chan struct{}, 8)
-	c.SetPingHandler(func(string) error {
-		pings <- struct{}{}
-		return nil
-	})
-	closed := make(chan error, 1)
-	go func() {
-		for {
-			if _, _, err := c.ReadMessage(); err != nil {
-				closed <- err
-				return
-			}
-		}
-	}()
-
-	env.Clock.Advance(30 * time.Second)
-	select {
-	case <-pings:
-	case <-time.After(5 * time.Second):
-		t.Fatal("no ping received")
-	}
-	env.Clock.Advance(30 * time.Second)
-	select {
-	case err := <-closed:
-		var closeErr *websocket.CloseError
-		require.ErrorAs(t, err, &closeErr)
-		assert.Equal(t, protocol.CloseGoingAway, closeErr.Code)
-	case <-time.After(5 * time.Second):
-		t.Fatal("connection was not closed after missing pongs")
-	}
-}
-
 func TestShutdownClosesConnectionsWithGoingAway(t *testing.T) {
 	t.Parallel()
 	env := rttest.NewEnv(t)

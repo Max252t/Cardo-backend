@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,7 +54,6 @@ type Client struct {
 
 	expiresAt   atomic.Int64
 	expiryReset chan struct{}
-	lastPong    atomic.Int64
 	latestSeq   atomic.Int64
 	closing     atomic.Bool
 
@@ -91,7 +91,6 @@ func newClient(h *Hub, conn *websocket.Conn, boardID uuid.UUID, member domain.Me
 	}
 	c.role.Store(member.Role)
 	c.expiresAt.Store(expiresAt.UnixNano())
-	c.lastPong.Store(h.clock.Now().UnixNano())
 	return c
 }
 
@@ -255,10 +254,6 @@ func (c *Client) writePump() {
 				return
 			}
 		case <-ping.C():
-			if c.hub.clock.Now().UnixNano()-c.lastPong.Load() >= int64(c.hub.cfg.PongWait) {
-				c.closeNow(protocol.CloseGoingAway, "pong timeout")
-				return
-			}
 			if err := c.write(websocket.PingMessage, nil); err != nil {
 				c.cancel()
 				return
@@ -289,12 +284,13 @@ func (c *Client) writeClose(item outbound) {
 }
 
 func (c *Client) touch() {
-	c.lastPong.Store(c.hub.clock.Now().UnixNano())
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.hub.cfg.PongWait))
 }
 
 func (c *Client) readPump() {
 	defer close(c.readDone)
 	c.conn.SetReadLimit(c.hub.cfg.MaxMessageBytes)
+	c.touch()
 	c.conn.SetPongHandler(func(string) error {
 		c.touch()
 		return nil
@@ -303,6 +299,7 @@ func (c *Client) readPump() {
 		messageType, data, err := c.conn.ReadMessage()
 		if err != nil {
 			c.hub.logger.Debug("websocket read ended", c.logAttrs(slog.Any("error", err))...)
+			c.closeIfIdle(err)
 			return
 		}
 		c.touch()
@@ -369,4 +366,14 @@ func writeCloseFrame(conn *websocket.Conn, code int, reason string, wait time.Du
 	_ = conn.WriteControl(websocket.CloseMessage,
 		websocket.FormatCloseMessage(code, protocol.CloseReason(reason)),
 		time.Now().Add(wait))
+}
+
+func (c *Client) closeIfIdle(err error) {
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		return
+	}
+	if c.closing.CompareAndSwap(false, true) {
+		c.sendCloseFrame(protocol.CloseNormal, "pong timeout")
+	}
 }

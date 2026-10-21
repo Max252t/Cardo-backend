@@ -419,51 +419,6 @@ func TestPingsAreSentEveryIntervalAndAnsweredClientsStayConnected(t *testing.T) 
 	assert.Equal(t, 1, inst.Hub.ConnectionCount(env.Board.ID))
 }
 
-func TestAnyClientTrafficCountsAsLivenessEvenWithoutPongs(t *testing.T) {
-	t.Parallel()
-	env, ann, inst := newEditorEnv(t, func(e *rttest.Env) {
-		e.Config = realtime.Config{PingInterval: 30 * time.Second, PongWait: 60 * time.Second, HelloTimeout: 1000 * time.Hour}
-	})
-	c := inst.Dial(t, ann)
-	c.HandshakeSnapshot()
-	w := watch(t, c, false)
-	waitTimers(t, env, 2)
-
-	for range 6 {
-		env.Clock.Advance(30 * time.Second)
-		w.expectPing(t)
-		w.barrier(t)
-	}
-	assert.Equal(t, 1, inst.Hub.ConnectionCount(env.Board.ID))
-}
-
-func TestSilentClientIsClosedAfterThePongWait(t *testing.T) {
-	t.Parallel()
-	env, ann, inst := newEditorEnv(t, func(e *rttest.Env) {
-		e.Config = realtime.Config{PingInterval: 30 * time.Second, PongWait: 90 * time.Second, HelloTimeout: 1000 * time.Hour}
-	})
-	c := inst.Dial(t, ann)
-	c.HandshakeSnapshot()
-	w := watch(t, c, false)
-	waitTimers(t, env, 2)
-
-	for range 2 {
-		env.Clock.Advance(30 * time.Second)
-		w.expectPing(t)
-	}
-	assert.Equal(t, 1, inst.Hub.ConnectionCount(env.Board.ID))
-	env.Clock.Advance(30 * time.Second)
-	select {
-	case err := <-w.done:
-		var closeErr *websocket.CloseError
-		require.ErrorAs(t, err, &closeErr)
-		assert.Equal(t, protocol.CloseGoingAway, closeErr.Code)
-	case <-time.After(eventually):
-		t.Fatal("connection was not closed after the pong wait")
-	}
-	waitConnections(t, inst, env.Board.ID, 0)
-}
-
 func awaitOwnEvent(c *rttest.Conn, opID uuid.UUID) protocol.Envelope {
 	for {
 		env := c.MustNext()
@@ -471,4 +426,58 @@ func awaitOwnEvent(c *rttest.Conn, opID uuid.UUID) protocol.Envelope {
 			return env
 		}
 	}
+}
+
+func TestAnyClientTrafficCountsAsLivenessEvenWithoutPongs(t *testing.T) {
+	t.Parallel()
+	env, ann, inst := newEditorEnv(t, func(e *rttest.Env) {
+		e.Config = realtime.Config{PongWait: 600 * time.Millisecond, PingInterval: 1000 * time.Hour, HelloTimeout: 1000 * time.Hour}
+	})
+	c := inst.Dial(t, ann)
+	c.HandshakeSnapshot()
+	w := watch(t, c, false)
+
+	for range 8 {
+		time.Sleep(150 * time.Millisecond)
+		w.barrier(t)
+	}
+	assert.Equal(t, 1, inst.Hub.ConnectionCount(env.Board.ID))
+}
+
+func TestSilentClientIsDroppedAfterThePongWaitWithANormalClose(t *testing.T) {
+	t.Parallel()
+	env, ann, inst := newEditorEnv(t, func(e *rttest.Env) {
+		e.Config = realtime.Config{PongWait: 300 * time.Millisecond, PingInterval: 1000 * time.Hour, HelloTimeout: 1000 * time.Hour}
+	})
+	c := inst.Dial(t, ann)
+	c.HandshakeSnapshot()
+	w := watch(t, c, false)
+
+	select {
+	case err := <-w.done:
+		var closeErr *websocket.CloseError
+		require.ErrorAs(t, err, &closeErr)
+		assert.Equal(t, protocol.CloseNormal, closeErr.Code)
+	case <-time.After(eventually):
+		t.Fatal("connection was not closed after the pong wait")
+	}
+	waitConnections(t, inst, env.Board.ID, 0)
+}
+
+func TestAnsweredPingsKeepTheConnectionPastThePongWait(t *testing.T) {
+	t.Parallel()
+	env, ann, inst := newEditorEnv(t, func(e *rttest.Env) {
+		e.Config = realtime.Config{PongWait: 400 * time.Millisecond, PingInterval: 100 * time.Millisecond, HelloTimeout: 1000 * time.Hour}
+	})
+	c := inst.Dial(t, ann)
+	c.HandshakeSnapshot()
+	w := watch(t, c, true)
+	waitTimers(t, env, 2)
+
+	for range 12 {
+		env.Clock.Advance(100 * time.Millisecond)
+		w.expectPing(t)
+		time.Sleep(100 * time.Millisecond)
+	}
+	assert.Equal(t, 1, inst.Hub.ConnectionCount(env.Board.ID))
 }
