@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var ErrDuplicateID = errors.New("storage: id already exists")
+var ErrDuplicateID = errors.New("id already exists")
 
 type EventDraft struct {
 	Type    string

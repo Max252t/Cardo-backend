@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,6 +29,7 @@ func (h *Hub) upgrader() *websocket.Upgrader {
 		ReadBufferSize:  handshakeBufferSize,
 		WriteBufferSize: handshakeBufferSize,
 		CheckOrigin:     h.checkOrigin,
+		Error:           rejectUpgrade,
 	}
 }
 
@@ -66,4 +68,23 @@ func closeCodeFor(err error) int {
 		return protocol.CloseGoingAway
 	}
 	return protocol.CloseTryAgainLater
+}
+
+type upgradeErrorBody struct {
+	Error upgradeErrorDetail `json:"error"`
+}
+
+type upgradeErrorDetail struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func rejectUpgrade(w http.ResponseWriter, _ *http.Request, status int, _ error) {
+	code, message := "bad_request", "invalid websocket handshake"
+	if status == http.StatusForbidden {
+		code, message = "forbidden", "origin is not allowed"
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(upgradeErrorBody{Error: upgradeErrorDetail{Code: code, Message: message}})
 }

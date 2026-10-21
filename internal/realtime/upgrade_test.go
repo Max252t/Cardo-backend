@@ -230,3 +230,23 @@ func TestMembershipIsCheckedBeforeTheUpgradeForEveryRole(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusNotFound, status)
 }
+
+func TestRejectedOriginReturnsTheUnifiedJSONError(t *testing.T) {
+	t.Parallel()
+	env, ann, inst := newEditorEnv(t, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, inst.Server.URL+"/ws/boards/"+env.Board.ID.String(), nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+env.IssueToken(t, ann))
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Content-Type"), "application/json")
+	assert.Equal(t, "forbidden", errorCodeOf(t, resp.Body))
+}
