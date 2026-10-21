@@ -53,7 +53,7 @@ func run() error {
 	store := storage.New(pool, storage.WithLockTimeout(cfg.DBLockTimeout))
 	readiness := map[string]httpapi.Checker{"postgres": store}
 
-	rdb, err := openRedis(cfg.RedisURL)
+	rdb, err := openRedis(cfg)
 	if err != nil {
 		return err
 	}
@@ -130,10 +130,11 @@ func openDatabase(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	return pool, nil
 }
 
-func openRedis(redisURL string) (*redis.Client, error) {
-	if redisURL == "" {
+func openRedis(cfg config.Config) (*redis.Client, error) {
+	if cfg.SingleInstance {
 		return nil, nil
 	}
+	redisURL := cfg.RedisURL
 	opts, err := redis.ParseURL(redisURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse redis url: %w", err)
@@ -148,8 +149,8 @@ func closeRedis(rdb *redis.Client, logger *slog.Logger) {
 }
 
 func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) auth.LoginLimiter {
-	if cfg.LoginLimiter == config.LoginLimiterMemory || rdb == nil {
-		logger.Warn("using per-instance in-memory login rate limiter, not suitable for multiple instances")
+	if rdb == nil {
+		logger.Warn("SINGLE_INSTANCE is enabled: using the in-memory login rate limiter")
 		return ratelimit.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
 	}
 	return ratelimit.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)

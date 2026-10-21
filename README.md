@@ -103,8 +103,9 @@ All settings come from environment variables; see `.env.example` for the full li
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `DATABASE_URL` | — | Required. |
-| `REDIS_URL` | — | Required unless `LOGIN_LIMITER=memory`. When set, `/readyz` also checks Redis. |
-| `LOGIN_LIMITER` | `redis` | `memory` is a development-only opt-in: the counter is per instance, so limits are not shared between API replicas. |
+| `REDIS_URL` | — | Required unless `SINGLE_INSTANCE=true`. Backs pub/sub, presence and the login rate limiter; `/readyz` also checks it. |
+| `SINGLE_INSTANCE` | `false` | Development and single-replica opt-in: the login rate limiter, event pub/sub and presence run in process and `REDIS_URL` is not used. Never enable it with more than one API replica. |
+| `WS_ALLOWED_ORIGINS` | empty | Comma-separated allowlist of `Origin` values for WebSocket upgrades. Empty means same-origin only. Requests without an `Origin` header (native clients) are always accepted. |
 | `JWT_SECRET` | — | Required, at least 32 bytes. |
 | `TRUSTED_PROXIES` | empty | Comma-separated IPs/CIDRs of the reverse proxy (the nginx container network, e.g. `172.16.0.0/12`). Must be set behind nginx, otherwise every request appears to come from the proxy and the per-IP login limit is shared by all clients. Leave empty when the API is exposed directly. |
 | `DB_MAX_CONNS` | `20` | At least 2: migrations hold one connection for the advisory lock and need another. |
@@ -126,6 +127,8 @@ Integration tests use testcontainers and require a running Docker daemon.
 
 REST (`/api`): authentication, profile, boards, snapshot, event log, members, invites.
 WebSocket (`/ws/boards/{id}`, `Authorization: Bearer <token>`): all board content mutations and all events.
+
+The WebSocket endpoint authenticates and checks board membership before upgrading. A missing or invalid token gets `401`; a user who is not a member of the board (or a board that does not exist) gets `404`, the same as the REST endpoints, so board existence is not leaked. A rejected `Origin` gets `403`.
 
 | Method | Path | Description |
 |--------|------|-------------|

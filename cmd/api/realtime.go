@@ -66,6 +66,6 @@ func newTransport(rdb *redis.Client, logger *slog.Logger) (pubsub.Broker, presen
 	if rdb != nil {
 		return pubsub.NewRedisBroker(context.Background(), rdb), presencestore.NewRedisStore(rdb)
 	}
-	logger.Warn("REDIS_URL is empty, using in-process pub/sub and presence, not suitable for multiple instances")
+	logger.Warn("SINGLE_INSTANCE is enabled: using in-process pub/sub and presence")
 	return pubsub.NewMemoryNetwork().NewBroker(), presencestore.NewMemoryStore()
 }

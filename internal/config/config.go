@@ -14,9 +14,6 @@ import (
 const (
 	minJWTSecretLength = 32
 	minDBConns         = 2
-
-	LoginLimiterRedis  = "redis"
-	LoginLimiterMemory = "memory"
 )
 
 type Config struct {
@@ -36,7 +33,8 @@ type Config struct {
 	DBLockTimeout      time.Duration
 	MigrateOnStart     bool
 
-	RedisURL string
+	RedisURL       string
+	SingleInstance bool
 
 	JWTSecret       []byte
 	JWTIssuer       string
@@ -44,7 +42,6 @@ type Config struct {
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 
-	LoginLimiter       string
 	LoginMaxFailures   int
 	LoginFailureWindow time.Duration
 
@@ -78,12 +75,12 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		DBLockTimeout:      p.duration("DB_LOCK_TIMEOUT", 5*time.Second),
 		MigrateOnStart:     p.boolean("MIGRATE_ON_START", true),
 		RedisURL:           p.str("REDIS_URL", ""),
+		SingleInstance:     p.boolean("SINGLE_INSTANCE", false),
 		JWTSecret:          []byte(p.str("JWT_SECRET", "")),
 		JWTIssuer:          p.str("JWT_ISSUER", "cardo"),
 		JWTAudience:        p.str("JWT_AUDIENCE", "cardo-api"),
 		AccessTokenTTL:     p.duration("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:    p.duration("REFRESH_TOKEN_TTL", 7*24*time.Hour),
-		LoginLimiter:       strings.ToLower(p.str("LOGIN_LIMITER", LoginLimiterRedis)),
 		LoginMaxFailures:   p.integer("LOGIN_MAX_FAILURES", 5),
 		LoginFailureWindow: p.duration("LOGIN_FAILURE_WINDOW", time.Minute),
 		HashMaxConcurrent:  p.integer("ARGON2_MAX_CONCURRENT", 0),
@@ -144,7 +141,7 @@ func (c Config) validate() error {
 	if c.HashAcquireTimeout <= 0 {
 		errs = append(errs, errors.New("ARGON2_ACQUIRE_TIMEOUT must be positive"))
 	}
-	errs = append(errs, c.validateLimiter()...)
+	errs = append(errs, c.validateRedis()...)
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
 	}
@@ -250,15 +247,9 @@ func (p *parser) level(key string, def slog.Level) slog.Level {
 	return l
 }
 
-func (c Config) validateLimiter() []error {
-	switch c.LoginLimiter {
-	case LoginLimiterRedis:
-		if c.RedisURL == "" {
-			return []error{errors.New("REDIS_URL is required unless LOGIN_LIMITER=memory")}
-		}
-	case LoginLimiterMemory:
-	default:
-		return []error{fmt.Errorf("LOGIN_LIMITER must be %q or %q", LoginLimiterRedis, LoginLimiterMemory)}
+func (c Config) validateRedis() []error {
+	if !c.SingleInstance && c.RedisURL == "" {
+		return []error{errors.New("REDIS_URL is required unless SINGLE_INSTANCE=true")}
 	}
 	return nil
 }
