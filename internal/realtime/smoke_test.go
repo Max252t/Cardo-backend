@@ -666,7 +666,7 @@ func TestOversizedMessageDropsConnection(t *testing.T) {
 func TestSlowClientIsDisconnectedWhenSendBufferOverflows(t *testing.T) {
 	t.Parallel()
 	env := rttest.NewEnv(t)
-	env.Config = realtime.Config{SendBuffer: 2, WriteWait: 200 * time.Millisecond}
+	env.Config = realtime.Config{SendBuffer: 8, WriteWait: 200 * time.Millisecond}
 	ann := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	inst := env.StartInstance(t, "a")
 	c := inst.Dial(t, ann)
