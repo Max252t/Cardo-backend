@@ -44,6 +44,9 @@ func toScore(t time.Time) string {
 }
 
 func (r *RedisStore) Put(ctx context.Context, boardID uuid.UUID, members []string, at time.Time) error {
+	if len(members) == 0 {
+		return nil
+	}
 	zs := make([]redis.Z, 0, len(members))
 	for _, m := range members {
 		zs = append(zs, redis.Z{Score: float64(at.UnixMilli()), Member: m})
@@ -57,6 +60,9 @@ func (r *RedisStore) Put(ctx context.Context, boardID uuid.UUID, members []strin
 }
 
 func (r *RedisStore) Remove(ctx context.Context, boardID uuid.UUID, members ...string) error {
+	if len(members) == 0 {
+		return nil
+	}
 	args := make([]any, 0, len(members))
 	for _, m := range members {
 		args = append(args, m)
@@ -83,6 +89,9 @@ func (r *RedisStore) Stale(ctx context.Context, boardID uuid.UUID, upTo time.Tim
 }
 
 func (r *RedisStore) SaveProfiles(ctx context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error {
+	if len(users) == 0 {
+		return nil
+	}
 	values := make([]any, 0, len(users)*2)
 	for _, u := range users {
 		data, err := json.Marshal(u)
@@ -100,6 +109,9 @@ func (r *RedisStore) SaveProfiles(ctx context.Context, boardID uuid.UUID, users 
 }
 
 func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]protocol.PresenceUser, error) {
+	if len(ids) == 0 {
+		return []protocol.PresenceUser{}, nil
+	}
 	raw, err := r.client.HMGet(ctx, profilesKey(boardID), idStrings(ids)...).Result()
 	if err != nil {
 		return nil, err
@@ -120,6 +132,9 @@ func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid
 }
 
 func (r *RedisStore) DeleteProfiles(ctx context.Context, boardID uuid.UUID, ids ...uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	return r.client.HDel(ctx, profilesKey(boardID), idStrings(ids)...).Err()
 }
 
