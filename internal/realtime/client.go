@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,8 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
+
+var errClientClosing = errors.New("realtime: client is closing")
 
 type clientState int
 
@@ -150,26 +153,55 @@ func (c *Client) deliver(seq int64, data []byte) {
 	c.pending = append(c.pending, pendingMessage{seq: seq, data: data})
 }
 
-func (c *Client) goLive(sentSeq int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	seen := make(map[int64]struct{}, len(c.pending))
-	for _, p := range c.pending {
-		if p.seq > 0 {
-			if p.seq <= sentSeq {
-				continue
-			}
-			if _, dup := seen[p.seq]; dup {
-				continue
-			}
-			seen[p.seq] = struct{}{}
-			c.noteSeq(p.seq)
+func (c *Client) goLive(ctx context.Context, sentSeq int64, ready []byte) error {
+	seen := make(map[int64]struct{})
+	readySent := false
+	for {
+		c.mu.Lock()
+		batch := c.pending
+		c.pending = nil
+		if len(batch) == 0 && readySent {
+			c.state = stateLive
+			c.floor = sentSeq
+			c.mu.Unlock()
+			return nil
 		}
-		c.enqueue(p.data)
+		c.mu.Unlock()
+		for _, p := range batch {
+			if p.seq > 0 {
+				if p.seq <= sentSeq {
+					continue
+				}
+				if _, dup := seen[p.seq]; dup {
+					continue
+				}
+				seen[p.seq] = struct{}{}
+				c.noteSeq(p.seq)
+			}
+			if err := c.sendBlocking(ctx, p.data); err != nil {
+				return err
+			}
+		}
+		if len(batch) == 0 {
+			if err := c.sendBlocking(ctx, ready); err != nil {
+				return err
+			}
+			readySent = true
+		}
 	}
-	c.pending = nil
-	c.state = stateLive
-	c.floor = sentSeq
+}
+
+func (c *Client) sendBlocking(ctx context.Context, data []byte) error {
+	if c.closing.Load() {
+		return errClientClosing
+	}
+	select {
+	case c.send <- outbound{data: data}:
+		return nil
+	case <-ctx.Done():
+		c.closeNow(protocol.CloseSlowClient, "handshake flush timed out")
+		return ctx.Err()
+	}
 }
 
 func (c *Client) enqueue(data []byte) {

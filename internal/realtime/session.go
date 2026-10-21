@@ -215,13 +215,19 @@ func (c *Client) runHandshake(hello protocol.Hello) {
 		return
 	}
 	c.sendPresenceList(ctx)
-	c.goLive(sentSeq)
-	c.sendMessage(protocol.TypeSyncReady, nil)
+	ready, err := protocol.Encode(protocol.TypeSyncReady, nil)
+	if err != nil {
+		c.failHandshake(err)
+		return
+	}
+	if err := c.goLive(ctx, sentSeq, ready); err != nil {
+		c.failHandshake(err)
+	}
 }
 
 func (c *Client) failHandshake(err error) {
 	switch {
-	case c.ctx.Err() != nil:
+	case c.ctx.Err() != nil, errors.Is(err, errClientClosing):
 	case errors.Is(err, domain.ErrNotFound):
 		c.closeWith(protocol.CloseBoardDeleted, "board not found")
 	case errors.Is(err, domain.ErrForbidden):
