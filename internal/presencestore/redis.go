@@ -145,3 +145,11 @@ func idStrings(ids []uuid.UUID) []string {
 	}
 	return out
 }
+
+func marshalProfile(u protocol.PresenceUser) (string, error) {
+	data, err := json.Marshal(u)
+	if err != nil {
+		return "", fmt.Errorf("marshal presence profile: %w", err)
+	}
+	return string(data), nil
+}

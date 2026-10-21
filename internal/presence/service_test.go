@@ -194,3 +194,63 @@ func TestTouchWithoutUsersIsNoop(t *testing.T) {
 	f := newFixture()
 	require.NoError(t, f.a.Touch(context.Background(), f.board, nil))
 }
+
+func TestConcurrentJoinsAndLeavesAcrossInstancesAnnounceAlternately(t *testing.T) {
+	t.Parallel()
+	f := newFixture()
+	ctx := context.Background()
+	u := user("Ann")
+	instances := []*presence.Service{f.a, f.b, presence.New(f.store, f.rec, f.clock, "c"), presence.New(f.store, f.rec, f.clock, "d")}
+
+	var wg sync.WaitGroup
+	for _, svc := range instances {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 200 {
+				assert.NoError(t, svc.Join(ctx, f.board, u))
+				assert.NoError(t, svc.Leave(ctx, f.board, u.ID))
+			}
+		}()
+	}
+	wg.Wait()
+
+	types := f.rec.types()
+	require.NotEmpty(t, types)
+	for i, typ := range types {
+		want := protocol.TypePresenceJoin
+		if i%2 == 1 {
+			want = protocol.TypePresenceLeave
+		}
+		require.Equal(t, want, typ, "announcement %d breaks the join/leave alternation", i)
+	}
+	assert.Equal(t, protocol.TypePresenceLeave, types[len(types)-1])
+	online, err := f.a.Online(ctx, f.board)
+	require.NoError(t, err)
+	assert.Empty(t, online)
+}
+
+func TestSweepAnnouncesDepartedUsersOnceWithTheirIDs(t *testing.T) {
+	t.Parallel()
+	f := newFixture()
+	ctx := context.Background()
+	ann, bob := user("Ann"), user("Bob")
+	require.NoError(t, f.a.Join(ctx, f.board, ann))
+	require.NoError(t, f.b.Join(ctx, f.board, bob))
+	f.clock.Advance(50 * time.Second)
+
+	require.NoError(t, f.a.Sweep(ctx, f.board))
+	require.NoError(t, f.b.Sweep(ctx, f.board))
+	types := f.rec.types()
+	assert.Equal(t, []string{protocol.TypePresenceJoin, protocol.TypePresenceJoin, protocol.TypePresenceLeave, protocol.TypePresenceLeave}, types)
+	left := map[uuid.UUID]bool{}
+	for _, p := range f.rec.sent[2:] {
+		var leave protocol.PresenceLeave
+		require.NoError(t, json.Unmarshal(p.Payload, &leave))
+		left[leave.UserID] = true
+	}
+	assert.Equal(t, map[uuid.UUID]bool{ann.ID: true, bob.ID: true}, left)
+	online, err := f.a.Online(ctx, f.board)
+	require.NoError(t, err)
+	assert.Empty(t, online)
+}

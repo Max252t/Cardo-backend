@@ -2,10 +2,13 @@ package presence_test
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -180,4 +183,74 @@ func TestRedisServiceOnlineIsSortedByName(t *testing.T) {
 		names = append(names, u.Name)
 	}
 	assert.Equal(t, []string{"Amy", "Max", "Zed"}, names)
+}
+
+func TestRedisConcurrentJoinsAndLeavesAnnounceAlternately(t *testing.T) {
+	client := testutil.NewRedis(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	store := presencestore.NewRedisStore(client)
+	clock := &fakeClock{now: time.Now()}
+	board := uuid.New()
+	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
+
+	sub := client.Subscribe(ctx, protocol.PresenceChannel(board))
+	defer func() { _ = sub.Close() }()
+	_, err := sub.Receive(ctx)
+	require.NoError(t, err)
+	messages := sub.Channel(redis.WithChannelSize(4096))
+
+	var wg sync.WaitGroup
+	for _, name := range []string{"a", "b", "c", "d"} {
+		svc := presence.New(store, &recorder{}, clock, name)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				assert.NoError(t, svc.Join(ctx, board, u))
+				assert.NoError(t, svc.Leave(ctx, board, u.ID))
+			}
+		}()
+	}
+	wg.Wait()
+
+	var types []string
+	for quiet := false; !quiet; {
+		select {
+		case m := <-messages:
+			var env protocol.Envelope
+			require.NoError(t, json.Unmarshal([]byte(m.Payload), &env))
+			types = append(types, env.Type)
+		case <-time.After(500 * time.Millisecond):
+			quiet = true
+		}
+	}
+	require.NotEmpty(t, types)
+	for i, typ := range types {
+		want := protocol.TypePresenceJoin
+		if i%2 == 1 {
+			want = protocol.TypePresenceLeave
+		}
+		require.Equal(t, want, typ, "announcement %d breaks the join/leave alternation", i)
+	}
+	assert.Equal(t, protocol.TypePresenceLeave, types[len(types)-1])
+
+	online, err := presence.New(store, &recorder{}, clock, "probe").Online(ctx, board)
+	require.NoError(t, err)
+	assert.Empty(t, online)
+}
+
+func TestRedisStoreEmptyInputsAreNoops(t *testing.T) {
+	client := testutil.NewRedis(t)
+	ctx := context.Background()
+	store := presencestore.NewRedisStore(client)
+	board := uuid.New()
+
+	require.NoError(t, store.Put(ctx, board, nil, time.Now()))
+	require.NoError(t, store.Remove(ctx, board))
+	require.NoError(t, store.SaveProfiles(ctx, board, nil))
+	require.NoError(t, store.DeleteProfiles(ctx, board))
+	profiles, err := store.Profiles(ctx, board, nil)
+	require.NoError(t, err)
+	assert.Empty(t, profiles)
 }
