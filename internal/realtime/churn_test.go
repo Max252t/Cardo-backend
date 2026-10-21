@@ -237,7 +237,7 @@ func (p *orderingPresence) Leave(ctx context.Context, boardID, userID uuid.UUID)
 
 func TestReconnectWhileTheOldLeaveIsStillInFlightKeepsTheUserOnline(t *testing.T) {
 	t.Parallel()
-	t.Skip("BUG: Hub.leave calls presence.Leave outside the subscription lock, so a reconnect whose Join lands before the old connection's in-flight Leave leaves a connected user missing from the presence store until the next heartbeat")
+
 	env := rttest.NewEnv(t)
 	ann := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	spy := &orderingPresence{leaveEnter: make(chan struct{}), releaseOnce: make(chan struct{}), leaveDone: make(chan struct{})}
@@ -256,10 +256,117 @@ func TestReconnectWhileTheOldLeaveIsStillInFlightKeepsTheUserOnline(t *testing.T
 	<-spy.leaveEnter
 
 	second := inst.Dial(t, ann)
-	second.HandshakeSnapshot()
 	close(spy.releaseOnce)
 	<-spy.leaveDone
+	second.HandshakeSnapshot()
 	waitConnections(t, inst, env.Board.ID, 1)
 
 	assert.Equal(t, []string{"Ann"}, onlineNames(t, probe, env.Board.ID), "a user with a live connection must stay in the presence store")
+}
+
+type blockingTouch struct {
+	realtime.Presence
+	mu      sync.Mutex
+	armed   bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingTouch) Touch(ctx context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error {
+	p.mu.Lock()
+	armed := p.armed
+	p.armed = false
+	p.mu.Unlock()
+	if armed {
+		close(p.entered)
+		<-p.release
+	}
+	return p.Presence.Touch(ctx, boardID, users)
+}
+
+func TestHeartbeatInFlightDoesNotResurrectAUserWhoLeftMeanwhile(t *testing.T) {
+	t.Parallel()
+	env := rttest.NewEnv(t)
+	env.Config = realtime.Config{PresenceInterval: 15 * time.Second, PingInterval: 1000 * time.Hour, PongWait: 2000 * time.Hour, HelloTimeout: 1000 * time.Hour}
+	ann := rttest.AddUser(env, "Ann", domain.RoleEditor)
+	spy := &blockingTouch{entered: make(chan struct{}), release: make(chan struct{})}
+	inst := env.StartInstanceWith(t, "a", func(d *realtime.Deps) {
+		spy.Presence = d.Presence
+		d.Presence = spy
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go inst.Hub.Run(ctx)
+	probe := presenceProbe(t, env)
+
+	conn := inst.Dial(t, ann)
+	conn.HandshakeSnapshot()
+	waitTimers(t, env, 3)
+	spy.mu.Lock()
+	spy.armed = true
+	spy.mu.Unlock()
+	env.Clock.Advance(15 * time.Second)
+	<-spy.entered
+
+	require.NoError(t, conn.Close())
+	assert.Never(t, func() bool { return inst.Hub.ConnectionCount(env.Board.ID) == 0 }, 150*time.Millisecond, 5*time.Millisecond)
+	close(spy.release)
+	waitConnections(t, inst, env.Board.ID, 0)
+
+	require.Eventually(t, func() bool { return len(onlineNames(t, probe, env.Board.ID)) == 0 }, eventually, 5*time.Millisecond)
+	assert.Never(t, func() bool { return len(onlineNames(t, probe, env.Board.ID)) != 0 }, 150*time.Millisecond, 5*time.Millisecond)
+}
+
+type gatedBus struct {
+	realtime.Bus
+	entered     chan struct{}
+	release     chan struct{}
+	mu          sync.Mutex
+	subscribes  int
+	unsubscribe int
+}
+
+func (b *gatedBus) Subscribe(ctx context.Context, channels ...string) error {
+	close(b.entered)
+	<-b.release
+	b.mu.Lock()
+	b.subscribes++
+	b.mu.Unlock()
+	return b.Bus.Subscribe(ctx, channels...)
+}
+
+func (b *gatedBus) Unsubscribe(ctx context.Context, channels ...string) error {
+	b.mu.Lock()
+	b.unsubscribe++
+	b.mu.Unlock()
+	return b.Bus.Unsubscribe(ctx, channels...)
+}
+
+func TestJoinRacingShutdownReleasesItsSubscription(t *testing.T) {
+	t.Parallel()
+	env := rttest.NewEnv(t)
+	ann := rttest.AddUser(env, "Ann", domain.RoleEditor)
+	bus := &gatedBus{entered: make(chan struct{}), release: make(chan struct{})}
+	inst := env.StartInstanceWith(t, "a", func(d *realtime.Deps) {
+		bus.Bus = d.Bus
+		d.Bus = bus
+	})
+
+	conn, _, err := inst.TryDial(env.Board.ID, "Bearer "+env.IssueToken(t, ann), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	<-bus.entered
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, inst.Hub.Shutdown(ctx))
+	close(bus.release)
+
+	require.Eventually(t, func() bool {
+		bus.mu.Lock()
+		defer bus.mu.Unlock()
+		return bus.unsubscribe == 1
+	}, eventually, 5*time.Millisecond)
+	waitSubscribed(t, inst, env.Board.ID, false)
+	assert.Zero(t, inst.Hub.ConnectionCount(env.Board.ID))
 }

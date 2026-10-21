@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"sync"
 
@@ -63,7 +62,7 @@ type Hub struct {
 	cancelBase context.CancelFunc
 	wg         sync.WaitGroup
 
-	subMu   sync.Mutex
+	gates   boardGates
 	mu      sync.RWMutex
 	rooms   map[uuid.UUID]*room
 	closing bool
@@ -196,78 +195,6 @@ func (h *Hub) ConnectionCount(boardID uuid.UUID) int {
 	return 0
 }
 
-func (h *Hub) join(c *Client) error {
-	h.subMu.Lock()
-	first, err := h.register(c)
-	h.subMu.Unlock()
-	if err != nil {
-		return err
-	}
-	if first {
-		ctx, cancel := h.busContext()
-		defer cancel()
-		if err := h.presence.Join(ctx, c.boardID, c.profile); err != nil {
-			h.logger.Warn("presence join failed", c.logAttrs(slog.Any("error", err))...)
-		}
-	}
-	return nil
-}
-
-func (h *Hub) register(c *Client) (bool, error) {
-	h.mu.RLock()
-	closing := h.closing
-	r := h.rooms[c.boardID]
-	h.mu.RUnlock()
-	if closing {
-		return false, ErrShuttingDown
-	}
-	if r == nil {
-		ctx, cancel := h.busContext()
-		defer cancel()
-		if err := h.bus.Subscribe(ctx, protocol.BoardChannel(c.boardID), protocol.PresenceChannel(c.boardID)); err != nil {
-			return false, fmt.Errorf("subscribe board channels: %w", err)
-		}
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.closing {
-		return false, ErrShuttingDown
-	}
-	if r == nil {
-		r = &room{clients: make(map[*Client]struct{}), users: make(map[uuid.UUID]*roomUser)}
-		h.rooms[c.boardID] = r
-	}
-	r.clients[c] = struct{}{}
-	u := r.users[c.member.UserID]
-	if u == nil {
-		u = &roomUser{profile: c.profile}
-		r.users[c.member.UserID] = u
-	}
-	u.conns++
-	h.wg.Add(1)
-	return u.conns == 1, nil
-}
-
-func (h *Hub) leave(c *Client) {
-	h.subMu.Lock()
-	lastConn, empty := h.unregister(c)
-	if empty {
-		ctx, cancel := h.busContext()
-		if err := h.bus.Unsubscribe(ctx, protocol.BoardChannel(c.boardID), protocol.PresenceChannel(c.boardID)); err != nil {
-			h.logger.Warn("unsubscribe board channels failed", c.logAttrs(slog.Any("error", err))...)
-		}
-		cancel()
-	}
-	h.subMu.Unlock()
-	if lastConn {
-		ctx, cancel := h.busContext()
-		defer cancel()
-		if err := h.presence.Leave(ctx, c.boardID, c.member.UserID); err != nil {
-			h.logger.Warn("presence leave failed", c.logAttrs(slog.Any("error", err))...)
-		}
-	}
-}
-
 func (h *Hub) unregister(c *Client) (lastConn, empty bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -306,19 +233,6 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-func (h *Hub) heartbeat(ctx context.Context) {
-	for boardID, users := range h.onlineByBoard() {
-		opCtx, cancel := context.WithTimeout(ctx, h.cfg.BusTimeout)
-		if err := h.presence.Touch(opCtx, boardID, users); err != nil {
-			h.logger.Warn("presence heartbeat failed", slog.String("board_id", boardID.String()), slog.Any("error", err))
-		}
-		if err := h.presence.Sweep(opCtx, boardID); err != nil {
-			h.logger.Warn("presence sweep failed", slog.String("board_id", boardID.String()), slog.Any("error", err))
-		}
-		cancel()
-	}
-}
-
 func (h *Hub) Shutdown(ctx context.Context) error {
 	for _, c := range h.stopAccepting() {
 		c.closeWith(protocol.CloseGoingAway, "server shutting down")
@@ -349,21 +263,7 @@ func (h *Hub) dispatchPresence(boardID uuid.UUID, payload []byte) {
 }
 
 func (h *Hub) busContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(h.baseCtx), h.cfg.BusTimeout)
-}
-
-func (h *Hub) onlineByBoard() map[uuid.UUID][]protocol.PresenceUser {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	online := make(map[uuid.UUID][]protocol.PresenceUser, len(h.rooms))
-	for boardID, r := range h.rooms {
-		users := make([]protocol.PresenceUser, 0, len(r.users))
-		for _, u := range r.users {
-			users = append(users, u.profile)
-		}
-		online[boardID] = users
-	}
-	return online
+	return context.WithTimeout(h.baseCtx, h.cfg.BusTimeout)
 }
 
 func (h *Hub) stopAccepting() []*Client {
