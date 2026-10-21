@@ -25,10 +25,10 @@ func TestRedisStoreBacksTheServiceAcrossInstances(t *testing.T) {
 	defer cancel()
 	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
-	rec := &recorder{}
-	a := presence.New(store, rec, clock, "a")
-	b := presence.New(store, rec, clock, "b")
 	board := uuid.New()
+	rec := watchPresence(t, client, board)
+	a := presence.New(store, &recorder{}, clock, "a")
+	b := presence.New(store, &recorder{}, clock, "b")
 	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#445566"}
 
 	require.NoError(t, a.Join(ctx, board, u))
@@ -55,9 +55,9 @@ func TestRedisStoreSweepsStaleMembers(t *testing.T) {
 	defer cancel()
 	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
-	rec := &recorder{}
-	svc := presence.New(store, rec, clock, "a")
 	board := uuid.New()
+	rec := watchPresence(t, client, board)
+	svc := presence.New(store, &recorder{}, clock, "a")
 	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#445566"}
 
 	require.NoError(t, svc.Join(ctx, board, u))

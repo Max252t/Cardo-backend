@@ -140,10 +140,10 @@ func TestRedisStoreSweepsADeadInstanceButKeepsTheSameUserOnAnotherInstance(t *te
 	defer cancel()
 	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
-	rec := &recorder{}
-	dead := presence.New(store, rec, clock, "dead")
-	alive := presence.New(store, rec, clock, "alive")
 	board := uuid.New()
+	rec := watchPresence(t, client, board)
+	dead := presence.New(store, &recorder{}, clock, "dead")
+	alive := presence.New(store, &recorder{}, clock, "alive")
 	shared := protocol.PresenceUser{ID: uuid.New(), Name: "Shared", AvatarColor: "#112233"}
 	onlyDead := protocol.PresenceUser{ID: uuid.New(), Name: "Dead", AvatarColor: "#445566"}
 
@@ -253,4 +253,52 @@ func TestRedisStoreEmptyInputsAreNoops(t *testing.T) {
 	profiles, err := store.Profiles(ctx, board, nil)
 	require.NoError(t, err)
 	assert.Empty(t, profiles)
+}
+
+type redisAnnouncements struct {
+	mu    sync.Mutex
+	kinds []string
+}
+
+func watchPresence(t *testing.T, client *redis.Client, board uuid.UUID) *redisAnnouncements {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	sub := client.Subscribe(ctx, protocol.PresenceChannel(board))
+	t.Cleanup(func() {
+		cancel()
+		_ = sub.Close()
+	})
+	_, err := sub.Receive(ctx)
+	require.NoError(t, err)
+	w := &redisAnnouncements{}
+	go func() {
+		for m := range sub.Channel(redis.WithChannelSize(1024)) {
+			var env protocol.Envelope
+			if json.Unmarshal([]byte(m.Payload), &env) == nil {
+				w.mu.Lock()
+				w.kinds = append(w.kinds, env.Type)
+				w.mu.Unlock()
+			}
+		}
+	}()
+	return w
+}
+
+func (w *redisAnnouncements) count() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.kinds)
+}
+
+func (w *redisAnnouncements) types() []string {
+	for {
+		before := w.count()
+		time.Sleep(200 * time.Millisecond)
+		if w.count() == before {
+			break
+		}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string{}, w.kinds...)
 }
