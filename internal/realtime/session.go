@@ -65,7 +65,7 @@ func (c *Client) sendMessage(msgType string, payload any) {
 		c.hub.logger.Error("encode websocket message failed", c.logAttrs(slog.String("type", msgType), slog.Any("error", err))...)
 		return
 	}
-	c.enqueue(data)
+	c.reply(data)
 }
 
 func (c *Client) sendNack(opID uuid.UUID, nack boardcontent.Nack) {
@@ -128,11 +128,7 @@ func (c *Client) onRefresh(env protocol.Envelope) {
 	c.sendMessage(protocol.TypeAuthRefreshed, protocol.AuthRefreshed{ExpiresAt: claims.ExpiresAt.UnixMilli()})
 }
 
-func (c *Client) isLive() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.state == stateLive
-}
+func (c *Client) isLive() bool { return c.opsOpen.Load() }
 
 func (c *Client) allowOp() bool {
 	return c.limiter.AllowN(c.hub.clock.Now(), 1)
@@ -246,5 +242,5 @@ func (c *Client) enqueueJSON(failureMsg string, v any) {
 		c.hub.logger.Error(failureMsg, c.logAttrs(slog.Any("error", err))...)
 		return
 	}
-	c.enqueue(data)
+	c.reply(data)
 }

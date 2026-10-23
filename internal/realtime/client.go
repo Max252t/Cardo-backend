@@ -56,6 +56,7 @@ type Client struct {
 	expiryReset chan struct{}
 	latestSeq   atomic.Int64
 	closing     atomic.Bool
+	opsOpen     atomic.Bool
 
 	helloReceived chan struct{}
 	readDone      chan struct{}
@@ -182,6 +183,7 @@ func (c *Client) goLive(ctx context.Context, sentSeq int64, ready []byte) error 
 			}
 		}
 		if len(batch) == 0 {
+			c.opsOpen.Store(true)
 			if err := c.sendBlocking(ctx, ready); err != nil {
 				return err
 			}
@@ -376,4 +378,10 @@ func (c *Client) closeIfIdle(err error) {
 	if c.closing.CompareAndSwap(false, true) {
 		c.sendCloseFrame(protocol.CloseNormal, "pong timeout")
 	}
+}
+
+func (c *Client) reply(data []byte) {
+	ctx, cancel := context.WithTimeout(c.ctx, c.hub.cfg.WriteWait)
+	defer cancel()
+	_ = c.sendBlocking(ctx, data)
 }
