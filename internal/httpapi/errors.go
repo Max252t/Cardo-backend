@@ -31,6 +31,8 @@ const (
 	CodeBusy             = "busy"
 	CodeShuttingDown     = "shutting_down"
 	CodeGone             = "gone"
+	CodeAlreadyMember    = "already_member"
+	CodeInviteGone       = "invite_unavailable"
 	CodeInternal         = "internal"
 )
 
@@ -67,6 +69,8 @@ var sentinelErrors = []struct {
 	{domain.ErrRateLimited, apiError{status: http.StatusTooManyRequests, code: CodeRateLimited, message: "too many attempts, try again later", retryAfter: defaultRateLimitRetryAfter}},
 	{domain.ErrOverloaded, apiError{status: http.StatusServiceUnavailable, code: CodeOverloaded, message: "server is overloaded, try again later", retryAfter: unavailableRetryAfter}},
 	{domain.ErrGone, apiError{status: http.StatusGone, code: CodeGone, message: "requested events are no longer retained, load a snapshot"}},
+	{domain.ErrAlreadyMember, apiError{status: http.StatusConflict, code: CodeAlreadyMember, message: "user is already a member of this board"}},
+	{domain.ErrInviteUnavailable, apiError{status: http.StatusGone, code: CodeInviteGone, message: "invite is revoked, expired or exhausted"}},
 	{domain.ErrBusy, apiError{status: http.StatusServiceUnavailable, code: CodeBusy, message: "resource is busy, try again later", retryAfter: unavailableRetryAfter}},
 	{domain.ErrTokenExpired, apiError{status: http.StatusUnauthorized, code: CodeTokenExpired, message: "token has expired"}},
 	{domain.ErrTokenReused, apiError{status: http.StatusUnauthorized, code: CodeTokenReused, message: "refresh token was already used, session revoked"}},
