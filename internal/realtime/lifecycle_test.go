@@ -498,11 +498,11 @@ func TestNewHubRequiresItsDependencies(t *testing.T) {
 
 type nopPresence struct{}
 
-func (nopPresence) Join(context.Context, uuid.UUID, protocol.PresenceUser) error    { return nil }
-func (nopPresence) Leave(context.Context, uuid.UUID, uuid.UUID) error               { return nil }
-func (nopPresence) Touch(context.Context, uuid.UUID, []protocol.PresenceUser) error { return nil }
-func (nopPresence) Sweep(context.Context, uuid.UUID) error                          { return nil }
-func (nopPresence) Online(context.Context, uuid.UUID) ([]protocol.PresenceUser, error) {
+func (nopPresence) Join(context.Context, uuid.UUID, domain.PresenceUser) error    { return nil }
+func (nopPresence) Leave(context.Context, uuid.UUID, uuid.UUID) error             { return nil }
+func (nopPresence) Touch(context.Context, uuid.UUID, []domain.PresenceUser) error { return nil }
+func (nopPresence) Sweep(context.Context, uuid.UUID) error                        { return nil }
+func (nopPresence) Online(context.Context, uuid.UUID) ([]domain.PresenceUser, error) {
 	return nil, nil
 }
 
@@ -521,11 +521,11 @@ func TestPresenceListIsAnEmptyArrayWhenPresenceStoreFails(t *testing.T) {
 
 type failingPresence struct{ nopPresence }
 
-func (failingPresence) Join(context.Context, uuid.UUID, protocol.PresenceUser) error {
+func (failingPresence) Join(context.Context, uuid.UUID, domain.PresenceUser) error {
 	return errors.New("redis down")
 }
 
-func (failingPresence) Online(context.Context, uuid.UUID) ([]protocol.PresenceUser, error) {
+func (failingPresence) Online(context.Context, uuid.UUID) ([]domain.PresenceUser, error) {
 	return nil, errors.New("redis down")
 }
 

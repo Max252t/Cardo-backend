@@ -8,7 +8,6 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 type Ticker interface {
@@ -33,10 +32,10 @@ type Bus interface {
 }
 
 type Presence interface {
-	Join(ctx context.Context, boardID uuid.UUID, user protocol.PresenceUser) error
+	Join(ctx context.Context, boardID uuid.UUID, user domain.PresenceUser) error
 	Leave(ctx context.Context, boardID, userID uuid.UUID) error
-	Touch(ctx context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error
-	Online(ctx context.Context, boardID uuid.UUID) ([]protocol.PresenceUser, error)
+	Touch(ctx context.Context, boardID uuid.UUID, users []domain.PresenceUser) error
+	Online(ctx context.Context, boardID uuid.UUID) ([]domain.PresenceUser, error)
 	Sweep(ctx context.Context, boardID uuid.UUID) error
 }
 

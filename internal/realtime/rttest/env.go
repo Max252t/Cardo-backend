@@ -87,7 +87,7 @@ func (e *Env) StartInstanceWith(t testing.TB, name string, mutate func(*realtime
 	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	broker := e.Network.NewBroker()
-	svc := presence.New(e.Presence, broker, e.Clock, name)
+	svc := presence.New(e.Presence, pubsub.NewPresenceNotifier(broker), e.Clock, name)
 	deps := realtime.Deps{
 		Bus:      broker,
 		Presence: svc,

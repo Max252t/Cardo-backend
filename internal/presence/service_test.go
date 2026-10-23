@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
@@ -87,8 +88,8 @@ func newFixture() *fixture {
 	}
 }
 
-func user(name string) protocol.PresenceUser {
-	return protocol.PresenceUser{ID: uuid.New(), Name: name, AvatarColor: "#112233"}
+func user(name string) domain.PresenceUser {
+	return domain.PresenceUser{ID: uuid.New(), Name: name, AvatarColor: "#112233"}
 }
 
 func TestJoinAnnouncesOnlyFirstConnectionAcrossInstances(t *testing.T) {
@@ -104,11 +105,11 @@ func TestJoinAnnouncesOnlyFirstConnectionAcrossInstances(t *testing.T) {
 
 	var join protocol.PresenceJoin
 	require.NoError(t, json.Unmarshal(f.rec.sent[0].Payload, &join))
-	assert.Equal(t, u, join.User)
+	assert.Equal(t, u, join.User.ToDomain())
 
 	online, err := f.b.Online(ctx, f.board)
 	require.NoError(t, err)
-	assert.Equal(t, []protocol.PresenceUser{u}, online)
+	assert.Equal(t, []domain.PresenceUser{u}, online)
 }
 
 func TestLeaveAnnouncesOnlyWhenNoInstanceKeepsTheUser(t *testing.T) {
@@ -144,12 +145,12 @@ func TestTouchKeepsEntriesFreshAndStaleOnesAreSweptWithLeave(t *testing.T) {
 	require.NoError(t, f.b.Join(ctx, f.board, gone))
 
 	f.clock.Advance(30 * time.Second)
-	require.NoError(t, f.a.Touch(ctx, f.board, []protocol.PresenceUser{alive}))
+	require.NoError(t, f.a.Touch(ctx, f.board, []domain.PresenceUser{alive}))
 	f.clock.Advance(20 * time.Second)
 
 	online, err := f.a.Online(ctx, f.board)
 	require.NoError(t, err)
-	assert.Equal(t, []protocol.PresenceUser{alive}, online)
+	assert.Equal(t, []domain.PresenceUser{alive}, online)
 
 	require.NoError(t, f.a.Sweep(ctx, f.board))
 	assert.Equal(t, []string{protocol.TypePresenceJoin, protocol.TypePresenceJoin, protocol.TypePresenceLeave}, f.rec.types())
@@ -170,7 +171,7 @@ func TestSweepDoesNotAnnounceUserStillPresentElsewhere(t *testing.T) {
 	require.NoError(t, f.b.Join(ctx, f.board, u))
 
 	f.clock.Advance(50 * time.Second)
-	require.NoError(t, f.b.Touch(ctx, f.board, []protocol.PresenceUser{u}))
+	require.NoError(t, f.b.Touch(ctx, f.board, []domain.PresenceUser{u}))
 	require.NoError(t, f.b.Sweep(ctx, f.board))
 	assert.Equal(t, []string{protocol.TypePresenceJoin}, f.rec.types())
 }
@@ -186,7 +187,7 @@ func TestOnlineIsSortedAndDeduplicated(t *testing.T) {
 
 	online, err := f.a.Online(ctx, f.board)
 	require.NoError(t, err)
-	assert.Equal(t, []protocol.PresenceUser{amy, zed}, online)
+	assert.Equal(t, []domain.PresenceUser{amy, zed}, online)
 }
 
 func TestTouchWithoutUsersIsNoop(t *testing.T) {
@@ -253,4 +254,20 @@ func TestSweepAnnouncesDepartedUsersOnceWithTheirIDs(t *testing.T) {
 	online, err := f.a.Online(ctx, f.board)
 	require.NoError(t, err)
 	assert.Empty(t, online)
+}
+
+func (r *recorder) Joined(ctx context.Context, boardID uuid.UUID, u domain.PresenceUser) error {
+	data, err := protocol.Encode(protocol.TypePresenceJoin, protocol.PresenceJoin{User: protocol.FromPresenceUser(u)})
+	if err != nil {
+		return err
+	}
+	return r.Publish(ctx, protocol.PresenceChannel(boardID), data)
+}
+
+func (r *recorder) Left(ctx context.Context, boardID, userID uuid.UUID) error {
+	data, err := protocol.Encode(protocol.TypePresenceLeave, protocol.PresenceLeave{UserID: userID})
+	if err != nil {
+		return err
+	}
+	return r.Publish(ctx, protocol.PresenceChannel(boardID), data)
 }

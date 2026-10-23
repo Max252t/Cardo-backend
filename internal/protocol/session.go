@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Max252t/Cardo-backend/internal/boardcontent"
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/google/uuid"
 )
 
@@ -105,4 +106,12 @@ func Encode(msgType string, payload any) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(env)
+}
+
+func FromPresenceUser(u domain.PresenceUser) PresenceUser {
+	return PresenceUser{ID: u.ID, Name: u.Name, AvatarColor: u.AvatarColor}
+}
+
+func (u PresenceUser) ToDomain() domain.PresenceUser {
+	return domain.PresenceUser{ID: u.ID, Name: u.Name, AvatarColor: u.AvatarColor}
 }

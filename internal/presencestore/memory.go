@@ -1,7 +1,6 @@
 package presencestore
 
 import (
-	"bytes"
 	"context"
 	"slices"
 	"strings"
@@ -10,20 +9,20 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/presence"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 type MemoryStore struct {
 	mu       sync.Mutex
 	scores   map[uuid.UUID]map[string]time.Time
-	profiles map[uuid.UUID]map[uuid.UUID]protocol.PresenceUser
+	profiles map[uuid.UUID]map[uuid.UUID]domain.PresenceUser
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		scores:   make(map[uuid.UUID]map[string]time.Time),
-		profiles: make(map[uuid.UUID]map[uuid.UUID]protocol.PresenceUser),
+		profiles: make(map[uuid.UUID]map[uuid.UUID]domain.PresenceUser),
 	}
 }
 
@@ -70,12 +69,12 @@ func (m *MemoryStore) collect(boardID uuid.UUID, keep func(time.Time) bool) []st
 	return out
 }
 
-func (m *MemoryStore) SaveProfiles(_ context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error {
+func (m *MemoryStore) SaveProfiles(_ context.Context, boardID uuid.UUID, users []domain.PresenceUser) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	board := m.profiles[boardID]
 	if board == nil {
-		board = make(map[uuid.UUID]protocol.PresenceUser)
+		board = make(map[uuid.UUID]domain.PresenceUser)
 		m.profiles[boardID] = board
 	}
 	for _, u := range users {
@@ -84,10 +83,10 @@ func (m *MemoryStore) SaveProfiles(_ context.Context, boardID uuid.UUID, users [
 	return nil
 }
 
-func (m *MemoryStore) Profiles(_ context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]protocol.PresenceUser, error) {
+func (m *MemoryStore) Profiles(_ context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]domain.PresenceUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []protocol.PresenceUser
+	var out []domain.PresenceUser
 	for _, id := range ids {
 		if u, ok := m.profiles[boardID][id]; ok {
 			out = append(out, u)
@@ -119,13 +118,6 @@ func (m *MemoryStore) hasFreshUser(boardID uuid.UUID, prefix string, cutoff time
 	return false
 }
 
-func announce(ctx context.Context, a presence.Announcement) error {
-	if a.Via == nil {
-		return nil
-	}
-	return a.Via.Publish(ctx, a.Channel, a.Payload)
-}
-
 func (m *MemoryStore) Enter(ctx context.Context, boardID uuid.UUID, e presence.Entry) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -135,13 +127,13 @@ func (m *MemoryStore) Enter(ctx context.Context, boardID uuid.UUID, e presence.E
 	}
 	m.scores[boardID][e.Member] = e.At
 	if m.profiles[boardID] == nil {
-		m.profiles[boardID] = make(map[uuid.UUID]protocol.PresenceUser)
+		m.profiles[boardID] = make(map[uuid.UUID]domain.PresenceUser)
 	}
 	m.profiles[boardID][e.User.ID] = e.User
 	if present {
 		return false, nil
 	}
-	return true, announce(ctx, e.Join)
+	return true, notifyJoined(ctx, e.Notify, boardID, e.User)
 }
 
 func (m *MemoryStore) Exit(ctx context.Context, boardID uuid.UUID, x presence.Exit) (bool, error) {
@@ -152,7 +144,7 @@ func (m *MemoryStore) Exit(ctx context.Context, boardID uuid.UUID, x presence.Ex
 		return false, nil
 	}
 	delete(m.profiles[boardID], x.UserID)
-	return true, announce(ctx, x.Leave)
+	return true, notifyLeft(ctx, x.Notify, boardID, x.UserID)
 }
 
 func (m *MemoryStore) Sweep(ctx context.Context, boardID uuid.UUID, req presence.SweepRequest) ([]uuid.UUID, error) {
@@ -184,11 +176,23 @@ func (m *MemoryStore) Sweep(ctx context.Context, boardID uuid.UUID, req presence
 		}
 		delete(m.profiles[boardID], id)
 		departed = append(departed, id)
-		leave := req.LeaveTemplate
-		leave.Payload = bytes.ReplaceAll(leave.Payload, []byte(uuid.Nil.String()), []byte(id.String()))
-		if err := announce(ctx, leave); err != nil {
+		if err := notifyLeft(ctx, req.Notify, boardID, id); err != nil {
 			return departed, err
 		}
 	}
 	return departed, nil
+}
+
+func notifyJoined(ctx context.Context, n presence.Notifier, boardID uuid.UUID, user domain.PresenceUser) error {
+	if n == nil {
+		return nil
+	}
+	return n.Joined(ctx, boardID, user)
+}
+
+func notifyLeft(ctx context.Context, n presence.Notifier, boardID, userID uuid.UUID) error {
+	if n == nil {
+		return nil
+	}
+	return n.Left(ctx, boardID, userID)
 }

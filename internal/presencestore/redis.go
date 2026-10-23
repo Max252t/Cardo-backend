@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
@@ -88,13 +89,13 @@ func (r *RedisStore) Stale(ctx context.Context, boardID uuid.UUID, upTo time.Tim
 	}).Result()
 }
 
-func (r *RedisStore) SaveProfiles(ctx context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error {
+func (r *RedisStore) SaveProfiles(ctx context.Context, boardID uuid.UUID, users []domain.PresenceUser) error {
 	if len(users) == 0 {
 		return nil
 	}
 	values := make([]any, 0, len(users)*2)
 	for _, u := range users {
-		data, err := json.Marshal(u)
+		data, err := json.Marshal(protocol.FromPresenceUser(u))
 		if err != nil {
 			return fmt.Errorf("marshal presence profile: %w", err)
 		}
@@ -108,15 +109,15 @@ func (r *RedisStore) SaveProfiles(ctx context.Context, boardID uuid.UUID, users 
 	return err
 }
 
-func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]protocol.PresenceUser, error) {
+func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]domain.PresenceUser, error) {
 	if len(ids) == 0 {
-		return []protocol.PresenceUser{}, nil
+		return []domain.PresenceUser{}, nil
 	}
 	raw, err := r.client.HMGet(ctx, profilesKey(boardID), idStrings(ids)...).Result()
 	if err != nil {
 		return nil, err
 	}
-	users := make([]protocol.PresenceUser, 0, len(raw))
+	users := make([]domain.PresenceUser, 0, len(raw))
 	for _, v := range raw {
 		s, ok := v.(string)
 		if !ok {
@@ -126,7 +127,7 @@ func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid
 		if err := json.Unmarshal([]byte(s), &u); err != nil {
 			continue
 		}
-		users = append(users, u)
+		users = append(users, u.ToDomain())
 	}
 	return users, nil
 }
@@ -146,8 +147,8 @@ func idStrings(ids []uuid.UUID) []string {
 	return out
 }
 
-func marshalProfile(u protocol.PresenceUser) (string, error) {
-	data, err := json.Marshal(u)
+func marshalProfile(u domain.PresenceUser) (string, error) {
+	data, err := json.Marshal(protocol.FromPresenceUser(u))
 	if err != nil {
 		return "", fmt.Errorf("marshal presence profile: %w", err)
 	}

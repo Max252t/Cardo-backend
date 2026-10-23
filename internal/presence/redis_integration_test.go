@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
@@ -29,7 +30,7 @@ func TestRedisStoreBacksTheServiceAcrossInstances(t *testing.T) {
 	rec := watchPresence(t, client, board)
 	a := presence.New(store, &recorder{}, clock, "a")
 	b := presence.New(store, &recorder{}, clock, "b")
-	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#445566"}
+	u := domain.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#445566"}
 
 	require.NoError(t, a.Join(ctx, board, u))
 	require.NoError(t, b.Join(ctx, board, u))
@@ -37,7 +38,7 @@ func TestRedisStoreBacksTheServiceAcrossInstances(t *testing.T) {
 
 	online, err := a.Online(ctx, board)
 	require.NoError(t, err)
-	assert.Equal(t, []protocol.PresenceUser{u}, online)
+	assert.Equal(t, []domain.PresenceUser{u}, online)
 
 	require.NoError(t, a.Leave(ctx, board, u.ID))
 	assert.Len(t, rec.types(), 1)
@@ -58,7 +59,7 @@ func TestRedisStoreSweepsStaleMembers(t *testing.T) {
 	board := uuid.New()
 	rec := watchPresence(t, client, board)
 	svc := presence.New(store, &recorder{}, clock, "a")
-	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#445566"}
+	u := domain.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#445566"}
 
 	require.NoError(t, svc.Join(ctx, board, u))
 	clock.Advance(presence.DefaultTTL + time.Second)

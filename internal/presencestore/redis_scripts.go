@@ -7,6 +7,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Max252t/Cardo-backend/internal/presence"
+	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 const luaFreshUser = `
@@ -81,10 +82,14 @@ func (r *RedisStore) Enter(ctx context.Context, boardID uuid.UUID, e presence.En
 	if err != nil {
 		return false, err
 	}
+	join, err := protocol.Encode(protocol.TypePresenceJoin, protocol.PresenceJoin{User: protocol.FromPresenceUser(e.User)})
+	if err != nil {
+		return false, err
+	}
 	res, err := enterScript.Run(ctx, r.client,
 		[]string{scoreKey(boardID), profilesKey(boardID)},
 		e.UserPrefix, toScore(e.Cutoff), toScore(e.At), e.Member, r.keyTTL.Milliseconds(),
-		e.User.ID.String(), profile, e.Join.Channel, e.Join.Payload,
+		e.User.ID.String(), profile, protocol.PresenceChannel(boardID), join,
 	).Int()
 	if err != nil {
 		return false, err
@@ -93,9 +98,13 @@ func (r *RedisStore) Enter(ctx context.Context, boardID uuid.UUID, e presence.En
 }
 
 func (r *RedisStore) Exit(ctx context.Context, boardID uuid.UUID, x presence.Exit) (bool, error) {
+	leave, err := protocol.Encode(protocol.TypePresenceLeave, protocol.PresenceLeave{UserID: x.UserID})
+	if err != nil {
+		return false, err
+	}
 	res, err := exitScript.Run(ctx, r.client,
 		[]string{scoreKey(boardID), profilesKey(boardID)},
-		x.UserPrefix, x.Member, toScore(x.Cutoff), x.UserID.String(), x.Leave.Channel, x.Leave.Payload,
+		x.UserPrefix, x.Member, toScore(x.Cutoff), x.UserID.String(), protocol.PresenceChannel(boardID), leave,
 	).Int()
 	if err != nil {
 		return false, err
@@ -104,9 +113,13 @@ func (r *RedisStore) Exit(ctx context.Context, boardID uuid.UUID, x presence.Exi
 }
 
 func (r *RedisStore) Sweep(ctx context.Context, boardID uuid.UUID, req presence.SweepRequest) ([]uuid.UUID, error) {
+	template, err := protocol.Encode(protocol.TypePresenceLeave, protocol.PresenceLeave{UserID: uuid.Nil})
+	if err != nil {
+		return nil, err
+	}
 	raw, err := sweepScript.Run(ctx, r.client,
 		[]string{scoreKey(boardID), profilesKey(boardID)},
-		toScore(req.Cutoff), req.LeaveTemplate.Channel, req.LeaveTemplate.Payload, uuid.Nil.String(),
+		toScore(req.Cutoff), protocol.PresenceChannel(boardID), template, uuid.Nil.String(),
 	).StringSlice()
 	if err != nil {
 		return nil, err

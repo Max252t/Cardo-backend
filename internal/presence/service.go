@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Max252t/Cardo-backend/internal/protocol"
+	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
 const (
@@ -22,23 +22,18 @@ type Clock interface {
 	Now() time.Time
 }
 
-type Publisher interface {
-	Publish(ctx context.Context, channel string, payload []byte) error
-}
-
-type Announcement struct {
-	Channel string
-	Payload []byte
-	Via     Publisher
+type Notifier interface {
+	Joined(ctx context.Context, boardID uuid.UUID, user domain.PresenceUser) error
+	Left(ctx context.Context, boardID, userID uuid.UUID) error
 }
 
 type Entry struct {
 	Member     string
 	UserPrefix string
-	User       protocol.PresenceUser
+	User       domain.PresenceUser
 	At         time.Time
 	Cutoff     time.Time
-	Join       Announcement
+	Notify     Notifier
 }
 
 type Exit struct {
@@ -46,12 +41,12 @@ type Exit struct {
 	UserPrefix string
 	UserID     uuid.UUID
 	Cutoff     time.Time
-	Leave      Announcement
+	Notify     Notifier
 }
 
 type SweepRequest struct {
-	Cutoff        time.Time
-	LeaveTemplate Announcement
+	Cutoff time.Time
+	Notify Notifier
 }
 
 type Store interface {
@@ -59,14 +54,14 @@ type Store interface {
 	Exit(ctx context.Context, boardID uuid.UUID, x Exit) (bool, error)
 	Sweep(ctx context.Context, boardID uuid.UUID, req SweepRequest) ([]uuid.UUID, error)
 	Put(ctx context.Context, boardID uuid.UUID, members []string, at time.Time) error
-	SaveProfiles(ctx context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error
+	SaveProfiles(ctx context.Context, boardID uuid.UUID, users []domain.PresenceUser) error
 	Fresh(ctx context.Context, boardID uuid.UUID, after time.Time) ([]string, error)
-	Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]protocol.PresenceUser, error)
+	Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]domain.PresenceUser, error)
 }
 
 type Service struct {
 	store    Store
-	pub      Publisher
+	notifier Notifier
 	clock    Clock
 	instance string
 	ttl      time.Duration
@@ -82,8 +77,8 @@ func WithTTL(ttl time.Duration) Option {
 	}
 }
 
-func New(store Store, pub Publisher, clock Clock, instanceID string, opts ...Option) *Service {
-	s := &Service{store: store, pub: pub, clock: clock, instance: instanceID, ttl: DefaultTTL}
+func New(store Store, notifier Notifier, clock Clock, instanceID string, opts ...Option) *Service {
+	s := &Service{store: store, notifier: notifier, clock: clock, instance: instanceID, ttl: DefaultTTL}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -122,26 +117,14 @@ func (s *Service) freshUsers(ctx context.Context, boardID uuid.UUID) (map[uuid.U
 	return users, nil
 }
 
-func (s *Service) announcement(boardID uuid.UUID, msgType string, payload any) (Announcement, error) {
-	data, err := protocol.Encode(msgType, payload)
-	if err != nil {
-		return Announcement{}, err
-	}
-	return Announcement{Channel: protocol.PresenceChannel(boardID), Payload: data, Via: s.pub}, nil
-}
-
-func (s *Service) Join(ctx context.Context, boardID uuid.UUID, user protocol.PresenceUser) error {
-	join, err := s.announcement(boardID, protocol.TypePresenceJoin, protocol.PresenceJoin{User: user})
-	if err != nil {
-		return err
-	}
-	_, err = s.store.Enter(ctx, boardID, Entry{
+func (s *Service) Join(ctx context.Context, boardID uuid.UUID, user domain.PresenceUser) error {
+	_, err := s.store.Enter(ctx, boardID, Entry{
 		Member:     s.member(user.ID),
 		UserPrefix: UserPrefix(user.ID),
 		User:       user,
 		At:         s.clock.Now(),
 		Cutoff:     s.cutoff(),
-		Join:       join,
+		Notify:     s.notifier,
 	})
 	if err != nil {
 		return fmt.Errorf("enter presence: %w", err)
@@ -150,16 +133,12 @@ func (s *Service) Join(ctx context.Context, boardID uuid.UUID, user protocol.Pre
 }
 
 func (s *Service) Leave(ctx context.Context, boardID, userID uuid.UUID) error {
-	leave, err := s.announcement(boardID, protocol.TypePresenceLeave, protocol.PresenceLeave{UserID: userID})
-	if err != nil {
-		return err
-	}
-	_, err = s.store.Exit(ctx, boardID, Exit{
+	_, err := s.store.Exit(ctx, boardID, Exit{
 		Member:     s.member(userID),
 		UserPrefix: UserPrefix(userID),
 		UserID:     userID,
 		Cutoff:     s.cutoff(),
-		Leave:      leave,
+		Notify:     s.notifier,
 	})
 	if err != nil {
 		return fmt.Errorf("exit presence: %w", err)
@@ -167,7 +146,7 @@ func (s *Service) Leave(ctx context.Context, boardID, userID uuid.UUID) error {
 	return nil
 }
 
-func (s *Service) Touch(ctx context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error {
+func (s *Service) Touch(ctx context.Context, boardID uuid.UUID, users []domain.PresenceUser) error {
 	if len(users) == 0 {
 		return nil
 	}
@@ -180,13 +159,13 @@ func (s *Service) Touch(ctx context.Context, boardID uuid.UUID, users []protocol
 	return nil
 }
 
-func (s *Service) Online(ctx context.Context, boardID uuid.UUID) ([]protocol.PresenceUser, error) {
+func (s *Service) Online(ctx context.Context, boardID uuid.UUID) ([]domain.PresenceUser, error) {
 	fresh, err := s.freshUsers(ctx, boardID)
 	if err != nil {
 		return nil, err
 	}
 	if len(fresh) == 0 {
-		return []protocol.PresenceUser{}, nil
+		return []domain.PresenceUser{}, nil
 	}
 	users, err := s.store.Profiles(ctx, boardID, slices.Collect(maps.Keys(fresh)))
 	if err != nil {
@@ -197,17 +176,13 @@ func (s *Service) Online(ctx context.Context, boardID uuid.UUID) ([]protocol.Pre
 }
 
 func (s *Service) Sweep(ctx context.Context, boardID uuid.UUID) error {
-	template, err := s.announcement(boardID, protocol.TypePresenceLeave, protocol.PresenceLeave{UserID: uuid.Nil})
-	if err != nil {
-		return err
-	}
-	if _, err := s.store.Sweep(ctx, boardID, SweepRequest{Cutoff: s.cutoff(), LeaveTemplate: template}); err != nil {
+	if _, err := s.store.Sweep(ctx, boardID, SweepRequest{Cutoff: s.cutoff(), Notify: s.notifier}); err != nil {
 		return fmt.Errorf("sweep presence: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) membersOf(users []protocol.PresenceUser) []string {
+func (s *Service) membersOf(users []domain.PresenceUser) []string {
 	members := make([]string, 0, len(users))
 	for _, u := range users {
 		members = append(members, s.member(u.ID))
@@ -215,7 +190,7 @@ func (s *Service) membersOf(users []protocol.PresenceUser) []string {
 	return members
 }
 
-func byNameThenID(a, b protocol.PresenceUser) int {
+func byNameThenID(a, b domain.PresenceUser) int {
 	if c := strings.Compare(a.Name, b.Name); c != 0 {
 		return c
 	}

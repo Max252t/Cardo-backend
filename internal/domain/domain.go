@@ -190,3 +190,9 @@ type EventPage struct {
 	Seq     int64
 	HasMore bool
 }
+
+type PresenceUser struct {
+	ID          uuid.UUID
+	Name        string
+	AvatarColor string
+}

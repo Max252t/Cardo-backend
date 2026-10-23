@@ -13,6 +13,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
+	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
 	"github.com/Max252t/Cardo-backend/internal/realtime/rttest"
 )
@@ -21,7 +22,7 @@ func presenceProbe(t testing.TB, env *rttest.Env) *presence.Service {
 	t.Helper()
 	broker := env.Network.NewBroker()
 	t.Cleanup(func() { _ = broker.Close() })
-	return presence.New(env.Presence, broker, env.Clock, "probe")
+	return presence.New(env.Presence, pubsub.NewPresenceNotifier(broker), env.Clock, "probe")
 }
 
 func onlineNames(t testing.TB, svc *presence.Service, boardID uuid.UUID) []string {
@@ -200,8 +201,8 @@ func TestEntriesOfADeadInstanceAreSweptAndAnnouncedAsLeave(t *testing.T) {
 	waitTimers(t, env, 3)
 
 	deadBroker := env.Network.NewBroker()
-	dead := presence.New(env.Presence, deadBroker, env.Clock, "dead")
-	require.NoError(t, dead.Join(ctx, env.Board.ID, protocol.PresenceUser{ID: ghostID, Name: "Ghost", AvatarColor: "#112233"}))
+	dead := presence.New(env.Presence, pubsub.NewPresenceNotifier(deadBroker), env.Clock, "dead")
+	require.NoError(t, dead.Join(ctx, env.Board.ID, domain.PresenceUser{ID: ghostID, Name: "Ghost", AvatarColor: "#112233"}))
 	require.NoError(t, deadBroker.Close())
 	join := nextPresence(t, annConn)
 	require.Equal(t, protocol.TypePresenceJoin, join.Type)
@@ -243,8 +244,8 @@ func TestGhostOfADeadInstanceDoesNotHideAUserWhoIsStillConnectedElsewhere(t *tes
 	waitTimers(t, env, 5)
 
 	deadBroker := env.Network.NewBroker()
-	dead := presence.New(env.Presence, deadBroker, env.Clock, "dead")
-	require.NoError(t, dead.Join(ctx, env.Board.ID, protocol.PresenceUser{ID: bob, Name: "Bob", AvatarColor: "#112233"}))
+	dead := presence.New(env.Presence, pubsub.NewPresenceNotifier(deadBroker), env.Clock, "dead")
+	require.NoError(t, dead.Join(ctx, env.Board.ID, domain.PresenceUser{ID: bob, Name: "Bob", AvatarColor: "#112233"}))
 	require.NoError(t, deadBroker.Close())
 
 	env.Clock.Advance(time.Minute)

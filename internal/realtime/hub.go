@@ -38,7 +38,7 @@ func WithEventHook(eventType string, hook EventHook) HubOption {
 }
 
 type roomUser struct {
-	profile protocol.PresenceUser
+	profile domain.PresenceUser
 	conns   int
 }
 

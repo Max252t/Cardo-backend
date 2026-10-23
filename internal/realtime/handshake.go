@@ -83,13 +83,13 @@ func (c *Client) sendSnapshot(ctx context.Context) (int64, error) {
 }
 
 func (c *Client) sendPresenceList(ctx context.Context) {
-	users, err := c.hub.presence.Online(ctx, c.boardID)
+	online, err := c.hub.presence.Online(ctx, c.boardID)
 	if err != nil {
 		c.hub.logger.Warn("presence list failed", c.logAttrs(slog.Any("error", err))...)
-		users = nil
 	}
-	if users == nil {
-		users = []protocol.PresenceUser{}
+	users := make([]protocol.PresenceUser, 0, len(online))
+	for _, u := range online {
+		users = append(users, protocol.FromPresenceUser(u))
 	}
 	c.sendMessage(protocol.TypePresenceList, protocol.PresenceList{Users: users})
 }

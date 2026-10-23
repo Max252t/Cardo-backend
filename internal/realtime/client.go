@@ -44,7 +44,7 @@ type Client struct {
 	conn    *websocket.Conn
 	member  domain.Member
 	boardID uuid.UUID
-	profile protocol.PresenceUser
+	profile domain.PresenceUser
 	role    atomic.Value
 	send    chan outbound
 	limiter *rate.Limiter
@@ -79,7 +79,7 @@ func newClient(h *Hub, conn *websocket.Conn, boardID uuid.UUID, member domain.Me
 		conn:          conn,
 		member:        member,
 		boardID:       boardID,
-		profile:       protocol.PresenceUser{ID: member.UserID, Name: member.DisplayName, AvatarColor: member.AvatarColor},
+		profile:       domain.PresenceUser{ID: member.UserID, Name: member.DisplayName, AvatarColor: member.AvatarColor},
 		send:          make(chan outbound, h.cfg.SendBuffer),
 		limiter:       rate.NewLimiter(rate.Limit(h.cfg.OpsPerSecond), h.cfg.OpsBurst),
 		ctx:           ctx,

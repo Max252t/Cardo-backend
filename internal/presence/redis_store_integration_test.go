@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/presencestore"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
@@ -92,10 +93,10 @@ func TestRedisStoreKeysCarryAnExpiry(t *testing.T) {
 	ctx := context.Background()
 	store := presencestore.NewRedisStore(client)
 	board := uuid.New()
-	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
+	u := domain.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
 
 	require.NoError(t, store.Put(ctx, board, []string{u.ID.String() + "|a"}, time.Now()))
-	require.NoError(t, store.SaveProfiles(ctx, board, []protocol.PresenceUser{u}))
+	require.NoError(t, store.SaveProfiles(ctx, board, []domain.PresenceUser{u}))
 	for _, key := range []string{"presence:" + board.String(), "presence:" + board.String() + ":users"} {
 		ttl, err := client.TTL(ctx, key).Result()
 		require.NoError(t, err)
@@ -109,25 +110,25 @@ func TestRedisStoreProfiles(t *testing.T) {
 	ctx := context.Background()
 	store := presencestore.NewRedisStore(client)
 	board := uuid.New()
-	ann := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
-	bob := protocol.PresenceUser{ID: uuid.New(), Name: "Bob", AvatarColor: "#445566"}
+	ann := domain.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
+	bob := domain.PresenceUser{ID: uuid.New(), Name: "Bob", AvatarColor: "#445566"}
 
-	require.NoError(t, store.SaveProfiles(ctx, board, []protocol.PresenceUser{ann, bob}))
+	require.NoError(t, store.SaveProfiles(ctx, board, []domain.PresenceUser{ann, bob}))
 	got, err := store.Profiles(ctx, board, []uuid.UUID{ann.ID, bob.ID, uuid.New()})
 	require.NoError(t, err)
-	assert.ElementsMatch(t, []protocol.PresenceUser{ann, bob}, got, "unknown ids are skipped")
+	assert.ElementsMatch(t, []domain.PresenceUser{ann, bob}, got, "unknown ids are skipped")
 
 	renamed := ann
 	renamed.Name = "Annie"
-	require.NoError(t, store.SaveProfiles(ctx, board, []protocol.PresenceUser{renamed}))
+	require.NoError(t, store.SaveProfiles(ctx, board, []domain.PresenceUser{renamed}))
 	got, err = store.Profiles(ctx, board, []uuid.UUID{ann.ID})
 	require.NoError(t, err)
-	assert.Equal(t, []protocol.PresenceUser{renamed}, got)
+	assert.Equal(t, []domain.PresenceUser{renamed}, got)
 
 	require.NoError(t, store.DeleteProfiles(ctx, board, ann.ID, uuid.New()))
 	got, err = store.Profiles(ctx, board, []uuid.UUID{ann.ID, bob.ID})
 	require.NoError(t, err)
-	assert.Equal(t, []protocol.PresenceUser{bob}, got)
+	assert.Equal(t, []domain.PresenceUser{bob}, got)
 
 	other, err := store.Profiles(ctx, uuid.New(), []uuid.UUID{bob.ID})
 	require.NoError(t, err)
@@ -144,8 +145,8 @@ func TestRedisStoreSweepsADeadInstanceButKeepsTheSameUserOnAnotherInstance(t *te
 	rec := watchPresence(t, client, board)
 	dead := presence.New(store, &recorder{}, clock, "dead")
 	alive := presence.New(store, &recorder{}, clock, "alive")
-	shared := protocol.PresenceUser{ID: uuid.New(), Name: "Shared", AvatarColor: "#112233"}
-	onlyDead := protocol.PresenceUser{ID: uuid.New(), Name: "Dead", AvatarColor: "#445566"}
+	shared := domain.PresenceUser{ID: uuid.New(), Name: "Shared", AvatarColor: "#112233"}
+	onlyDead := domain.PresenceUser{ID: uuid.New(), Name: "Dead", AvatarColor: "#445566"}
 
 	require.NoError(t, dead.Join(ctx, board, shared))
 	require.NoError(t, dead.Join(ctx, board, onlyDead))
@@ -153,14 +154,14 @@ func TestRedisStoreSweepsADeadInstanceButKeepsTheSameUserOnAnotherInstance(t *te
 	assert.Equal(t, []string{protocol.TypePresenceJoin, protocol.TypePresenceJoin}, rec.types())
 
 	clock.Advance(30 * time.Second)
-	require.NoError(t, alive.Touch(ctx, board, []protocol.PresenceUser{shared}))
+	require.NoError(t, alive.Touch(ctx, board, []domain.PresenceUser{shared}))
 	clock.Advance(30 * time.Second)
 
 	require.NoError(t, alive.Sweep(ctx, board))
 	assert.Equal(t, []string{protocol.TypePresenceJoin, protocol.TypePresenceJoin, protocol.TypePresenceLeave}, rec.types())
 	online, err := alive.Online(ctx, board)
 	require.NoError(t, err)
-	assert.Equal(t, []protocol.PresenceUser{shared}, online)
+	assert.Equal(t, []domain.PresenceUser{shared}, online)
 
 	require.NoError(t, alive.Sweep(ctx, board))
 	assert.Len(t, rec.types(), 3, "sweeping twice does not announce twice")
@@ -174,7 +175,7 @@ func TestRedisServiceOnlineIsSortedByName(t *testing.T) {
 	svc := presence.New(store, &recorder{}, clock, "a")
 	board := uuid.New()
 	for _, name := range []string{"Zed", "Amy", "Max"} {
-		require.NoError(t, svc.Join(ctx, board, protocol.PresenceUser{ID: uuid.New(), Name: name, AvatarColor: "#000000"}))
+		require.NoError(t, svc.Join(ctx, board, domain.PresenceUser{ID: uuid.New(), Name: name, AvatarColor: "#000000"}))
 	}
 	online, err := svc.Online(ctx, board)
 	require.NoError(t, err)
@@ -192,7 +193,7 @@ func TestRedisConcurrentJoinsAndLeavesAnnounceAlternately(t *testing.T) {
 	store := presencestore.NewRedisStore(client)
 	clock := &fakeClock{now: time.Now()}
 	board := uuid.New()
-	u := protocol.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
+	u := domain.PresenceUser{ID: uuid.New(), Name: "Ann", AvatarColor: "#112233"}
 
 	sub := client.Subscribe(ctx, protocol.PresenceChannel(board))
 	defer func() { _ = sub.Close() }()

@@ -30,7 +30,7 @@ func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client
 	boardService := boards.NewService(store, boards.WithPublisher(publisher), boards.WithLogger(logger))
 	processor := ops.NewProcessor(store, ops.WithPublisher(publisher), ops.WithLogger(logger))
 	clock := realtime.SystemClock{}
-	presenceService := presence.New(presenceStore, broker, clock, uuid.NewString())
+	presenceService := presence.New(presenceStore, pubsub.NewPresenceNotifier(broker), clock, uuid.NewString())
 
 	hub, err := realtime.NewHub(realtime.Deps{
 		Bus:      broker,

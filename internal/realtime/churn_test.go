@@ -273,7 +273,7 @@ type blockingTouch struct {
 	release chan struct{}
 }
 
-func (p *blockingTouch) Touch(ctx context.Context, boardID uuid.UUID, users []protocol.PresenceUser) error {
+func (p *blockingTouch) Touch(ctx context.Context, boardID uuid.UUID, users []domain.PresenceUser) error {
 	p.mu.Lock()
 	armed := p.armed
 	p.armed = false

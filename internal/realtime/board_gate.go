@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
@@ -173,14 +174,14 @@ func (h *Hub) boardIDs() []uuid.UUID {
 	return ids
 }
 
-func (h *Hub) onlineUsers(boardID uuid.UUID) []protocol.PresenceUser {
+func (h *Hub) onlineUsers(boardID uuid.UUID) []domain.PresenceUser {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	r := h.rooms[boardID]
 	if r == nil {
 		return nil
 	}
-	users := make([]protocol.PresenceUser, 0, len(r.users))
+	users := make([]domain.PresenceUser, 0, len(r.users))
 	for _, u := range r.users {
 		users = append(users, u.profile)
 	}
