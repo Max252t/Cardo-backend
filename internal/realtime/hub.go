@@ -96,6 +96,8 @@ func NewHub(deps Deps, cfg Config, opts ...HubOption) (*Hub, error) {
 		rooms:      make(map[uuid.UUID]*room),
 	}
 	h.hooks[boardcontent.EventBoardDeleted] = []EventHook{closeBoardOnDelete}
+	h.hooks[boardcontent.EventMemberRemoved] = []EventHook{closeRemovedMember}
+	h.hooks[boardcontent.EventMemberRoleChanged] = []EventHook{applyRoleChange}
 	for _, opt := range opts {
 		opt(h)
 	}
