@@ -295,3 +295,21 @@ func presenceSubject(env protocol.Envelope) uuid.UUID {
 	}
 	return uuid.Nil
 }
+
+func closeRemovedMember(h *Hub, boardID uuid.UUID, ev protocol.Envelope) {
+	var removed boardcontent.MemberRemoved
+	if err := json.Unmarshal(ev.Payload, &removed); err != nil {
+		h.logger.Warn("dropping malformed member.removed event", slog.String("board_id", boardID.String()), slog.Any("error", err))
+		return
+	}
+	h.CloseUser(boardID, removed.UserID, protocol.CloseAccessRevoked, "access revoked")
+}
+
+func applyRoleChange(h *Hub, boardID uuid.UUID, ev protocol.Envelope) {
+	var changed boardcontent.MemberRoleChanged
+	if err := json.Unmarshal(ev.Payload, &changed); err != nil || !changed.Role.Valid() {
+		h.logger.Warn("dropping malformed member.role_changed event", slog.String("board_id", boardID.String()))
+		return
+	}
+	h.SetRole(boardID, changed.UserID, changed.Role)
+}
