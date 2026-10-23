@@ -10,24 +10,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
-
-type EventInput struct {
-	Type    string
-	Payload any
-	OpID    *uuid.UUID
-	ActorID *uuid.UUID
-}
-
-type BoardTxFunc func(ctx context.Context, btx *BoardTx) error
 
 type BoardTx struct {
 	tx    pgx.Tx
 	board domain.Board
 }
 
-func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn BoardTxFunc) error {
+var _ boardtx.Tx = (*BoardTx)(nil)
+
+func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx.Func) error {
 	err := s.InTx(ctx, func(tx pgx.Tx) error {
 		board, err := lockBoard(ctx, tx, boardID, s.lockTimeout)
 		if err != nil {
@@ -38,7 +32,7 @@ func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn BoardTx
 	return lockTimeoutAsBusy(err)
 }
 
-func (b *BoardTx) Savepoint(ctx context.Context, fn BoardTxFunc) error {
+func (b *BoardTx) Savepoint(ctx context.Context, fn boardtx.Func) error {
 	sp, err := b.tx.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin savepoint: %w", err)
@@ -87,7 +81,7 @@ func (b *BoardTx) RequireRole(ctx context.Context, userID uuid.UUID, min domain.
 	return role, nil
 }
 
-func (b *BoardTx) AppendEvent(ctx context.Context, in EventInput) (domain.Event, error) {
+func (b *BoardTx) AppendEvent(ctx context.Context, in domain.EventDraft) (domain.Event, error) {
 	if in.Type == "" {
 		return domain.Event{}, errors.New("event type is required")
 	}

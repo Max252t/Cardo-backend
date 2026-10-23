@@ -8,6 +8,7 @@ linters:
   default: standard
   enable:
     - bodyclose
+    - depguard
     - errorlint
     - gocritic
     - gosec
@@ -19,6 +20,54 @@ linters:
     - unconvert
     - unparam
   settings:
+    depguard:
+      rules:
+        inner-layer:
+          list-mode: strict
+          files:
+            - "!$test"
+            - "**/internal/domain/**"
+            - "**/internal/rank/**"
+            - "**/internal/boardcontent/**"
+            - "**/internal/boardtx/**"
+            - "**/internal/boardevents/**"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+            - github.com/Max252t/Cardo-backend/internal/domain
+            - github.com/Max252t/Cardo-backend/internal/rank
+            - github.com/Max252t/Cardo-backend/internal/boardcontent
+            - github.com/Max252t/Cardo-backend/internal/boardtx
+            - github.com/Max252t/Cardo-backend/internal/boardevents
+        use-cases:
+          list-mode: strict
+          files:
+            - "!$test"
+            - "**/internal/ops/**"
+            - "**/internal/boards/**"
+            - "**/internal/users/**"
+            - "**/internal/auth/**"
+            - "**/internal/presence/**"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+            - github.com/Max252t/Cardo-backend/internal/domain
+            - github.com/Max252t/Cardo-backend/internal/rank
+            - github.com/Max252t/Cardo-backend/internal/boardcontent
+            - github.com/Max252t/Cardo-backend/internal/boardtx
+            - github.com/Max252t/Cardo-backend/internal/boardevents
+        production-code:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/internal/realtime/rttest/**"
+            - "!**/internal/testutil/**"
+          deny:
+            - pkg: github.com/Max252t/Cardo-backend/internal/realtime/rttest
+              desc: test support must not be imported by production code
+            - pkg: github.com/Max252t/Cardo-backend/internal/testutil
+              desc: test support must not be imported by production code
     revive:
       rules:
         - name: exported

@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/pubsub"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 )
@@ -436,7 +436,7 @@ func TestRenameAndDeletePublishAfterCommit(t *testing.T) {
 		mu        sync.Mutex
 		published []domain.Event
 	)
-	svc := boards.NewService(store, boards.WithPublisher(pubsub.PublisherFunc(func(ctx context.Context, events []domain.Event) error {
+	svc := boards.NewService(store, boards.WithPublisher(boardevents.PublisherFunc(func(ctx context.Context, events []domain.Event) error {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, ev := range events {

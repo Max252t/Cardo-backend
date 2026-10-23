@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/ops"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 )
@@ -38,18 +38,18 @@ func (f *fixture) newBoard(t *testing.T, owner uuid.UUID) uuid.UUID {
 	return b.ID
 }
 
-func (f *fixture) applyOnBoard(t *testing.T, boardID, user, opID uuid.UUID, opType string, payload any) ops.Outcome {
+func (f *fixture) applyOnBoard(t *testing.T, boardID, user, opID uuid.UUID, opType string, payload any) boardcontent.OpOutcome {
 	t.Helper()
-	op, err := protocol.NewOp(opType, opID, payload)
+	op, err := boardcontent.NewOp(opType, opID, payload)
 	require.NoError(t, err)
 	out, err := f.proc.Apply(context.Background(), user, boardID, op)
 	require.NoError(t, err)
 	return out
 }
 
-func (f *fixture) applyRaw(t *testing.T, user uuid.UUID, opType, payload string) ops.Outcome {
+func (f *fixture) applyRaw(t *testing.T, user uuid.UUID, opType, payload string) boardcontent.OpOutcome {
 	t.Helper()
-	op := protocol.Op{Type: opType, OpID: uuid.New(), Payload: json.RawMessage(payload)}
+	op := boardcontent.Op{Type: opType, OpID: uuid.New(), Payload: json.RawMessage(payload)}
 	out, err := f.proc.Apply(context.Background(), user, f.board.ID, op)
 	require.NoError(t, err)
 	return out
@@ -189,13 +189,13 @@ func (f *fixture) requireUnchanged(t *testing.T, seq int64) {
 }
 
 type result struct {
-	out ops.Outcome
+	out boardcontent.OpOutcome
 	err error
 }
 
-func (f *fixture) applyConcurrently(t *testing.T, n int, build func(i int) (user uuid.UUID, op protocol.Op)) []result {
+func (f *fixture) applyConcurrently(t *testing.T, n int, build func(i int) (user uuid.UUID, op boardcontent.Op)) []result {
 	t.Helper()
-	prepared := make([]protocol.Op, n)
+	prepared := make([]boardcontent.Op, n)
 	users := make([]uuid.UUID, n)
 	for i := range n {
 		users[i], prepared[i] = build(i)
@@ -220,9 +220,9 @@ func (f *fixture) applyConcurrently(t *testing.T, n int, build func(i int) (user
 	return results
 }
 
-func mustOp(t *testing.T, opType string, opID uuid.UUID, payload any) protocol.Op {
+func mustOp(t *testing.T, opType string, opID uuid.UUID, payload any) boardcontent.Op {
 	t.Helper()
-	op, err := protocol.NewOp(opType, opID, payload)
+	op, err := boardcontent.NewOp(opType, opID, payload)
 	require.NoError(t, err)
 	return op
 }

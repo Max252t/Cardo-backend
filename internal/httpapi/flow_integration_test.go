@@ -17,11 +17,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ops"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
+	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
 	"github.com/Max252t/Cardo-backend/internal/users"
@@ -71,15 +74,15 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 	pool := testutil.NewMigratedPool(t)
 	store := storage.New(pool)
 	clock := &flowClock{now: time.Now()}
-	var limiter auth.LoginLimiter = auth.NewMemoryLimiter(5, time.Minute, clock)
+	var limiter auth.LoginLimiter = ratelimit.NewMemoryLimiter(5, time.Minute, clock)
 	readiness := map[string]httpapi.Checker{"postgres": store}
 	if withRedis {
 		redisClient := testutil.NewRedis(t)
-		limiter = auth.NewRedisLimiter(redisClient, 5, time.Minute)
+		limiter = ratelimit.NewRedisLimiter(redisClient, 5, time.Minute)
 		readiness["redis"] = httpapi.CheckerFunc(func(ctx context.Context) error { return redisClient.Ping(ctx).Err() })
 	}
 
-	jwtm := auth.NewJWTManager(auth.JWTConfig{
+	jwtm := jwtauth.New(jwtauth.Config{
 		Secret:   []byte("0123456789abcdef0123456789abcdef"),
 		Issuer:   "cardo",
 		Audience: "cardo-api",
@@ -87,7 +90,7 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 	}, clock)
 	authSvc := auth.NewService(auth.Deps{
 		Store:      store,
-		Hasher:     auth.NewArgon2Hasher(auth.Argon2Params{Memory: 8, Iterations: 1, Parallelism: 1, SaltLength: 8, KeyLength: 16}),
+		Hasher:     argon2id.New(argon2id.Params{Memory: 8, Iterations: 1, Parallelism: 1, SaltLength: 8, KeyLength: 16}),
 		Access:     jwtm,
 		Limiter:    limiter,
 		Clock:      clock,
@@ -481,10 +484,10 @@ func TestFlowSnapshotAndEventLog(t *testing.T) {
 		typ     string
 		payload any
 	}{
-		{protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: colID, Title: "Todo"}},
-		{protocol.OpCardCreate, protocol.CardCreate{CardID: cardID, ColumnID: colID, Title: "Card"}},
+		{boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: colID, Title: "Todo"}},
+		{boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardID, ColumnID: colID, Title: "Card"}},
 	} {
-		o, err := protocol.NewOp(op.typ, uuid.New(), op.payload)
+		o, err := boardcontent.NewOp(op.typ, uuid.New(), op.payload)
 		require.NoError(t, err)
 		out, err := proc.Apply(context.Background(), userID, boardID, o)
 		require.NoError(t, err)
@@ -500,8 +503,8 @@ func TestFlowSnapshotAndEventLog(t *testing.T) {
 	page := f.mustJSON(t, http.MethodGet, "/api/boards/"+boardID.String()+"/events?after_seq=0", "", alice.access, http.StatusOK)
 	events := page["events"].([]any)
 	require.Len(t, events, 2)
-	assert.Equal(t, protocol.EventColumnCreated, events[0].(map[string]any)["type"])
-	assert.Equal(t, protocol.EventCardCreated, events[1].(map[string]any)["type"])
+	assert.Equal(t, boardcontent.EventColumnCreated, events[0].(map[string]any)["type"])
+	assert.Equal(t, boardcontent.EventCardCreated, events[1].(map[string]any)["type"])
 
 	f.expectError(t, http.MethodGet, "/api/boards/"+boardID.String()+"/events?after_seq=3", "", alice.access, http.StatusBadRequest, httpapi.CodeValidation)
 	_, err := f.pool.Exec(context.Background(), `DELETE FROM board_events WHERE board_id = $1 AND seq = 1`, boardID)

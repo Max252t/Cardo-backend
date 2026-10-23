@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
@@ -117,7 +118,7 @@ func TestWithBoardLockNotFound(t *testing.T) {
 	b := createBoard(t, store, owner.ID, "Gone")
 
 	called := false
-	noop := func(context.Context, *storage.BoardTx) error { called = true; return nil }
+	noop := func(context.Context, boardtx.Tx) error { called = true; return nil }
 
 	err := store.WithBoardLock(ctx, uuid.New(), noop)
 	assert.ErrorIs(t, err, domain.ErrNotFound)
@@ -159,7 +160,7 @@ func TestBoardTxRoles(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+			err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx boardtx.Tx) error {
 				role, err := btx.RequireRole(ctx, tt.user, tt.min)
 				assert.Equal(t, tt.wantRole, role)
 				return err
@@ -182,8 +183,8 @@ func TestAppendEventAssignsSequentialSeq(t *testing.T) {
 	opID := uuid.New()
 
 	var events []domain.Event
-	err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		for i, in := range []storage.EventInput{
+	err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx boardtx.Tx) error {
+		for i, in := range []domain.EventDraft{
 			{Type: "t.nil", Payload: nil},
 			{Type: "t.raw", Payload: json.RawMessage(`{"a":1}`), OpID: &opID, ActorID: &owner.ID},
 			{Type: "t.empty-raw", Payload: json.RawMessage{}},
@@ -242,8 +243,8 @@ func TestAppendEventRejectsEmptyType(t *testing.T) {
 	owner := testutil.CreateUser(t, store, "empty-type@example.com")
 	b := createBoard(t, store, owner.ID, "T")
 
-	err := store.WithBoardLock(context.Background(), b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		_, err := btx.AppendEvent(ctx, storage.EventInput{Payload: nil})
+	err := store.WithBoardLock(context.Background(), b.ID, func(ctx context.Context, btx boardtx.Tx) error {
+		_, err := btx.AppendEvent(ctx, domain.EventDraft{Payload: nil})
 		return err
 	})
 	require.Error(t, err)
@@ -260,11 +261,11 @@ func TestWithBoardLockRollsBackOnError(t *testing.T) {
 	b := createBoard(t, store, owner.ID, "Original")
 	boom := errors.New("boom")
 
-	err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := store.WithBoardLock(ctx, b.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		if err := btx.SetTitle(ctx, "Changed"); err != nil {
 			return err
 		}
-		if _, err := btx.AppendEvent(ctx, storage.EventInput{Type: "t.x"}); err != nil {
+		if _, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "t.x"}); err != nil {
 			return err
 		}
 		return boom
@@ -285,8 +286,8 @@ func TestAppendEventUnmarshalablePayload(t *testing.T) {
 	owner := testutil.CreateUser(t, store, "badpayload@example.com")
 	b := createBoard(t, store, owner.ID, "T")
 
-	err := store.WithBoardLock(context.Background(), b.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		_, err := btx.AppendEvent(ctx, storage.EventInput{Type: "t.bad", Payload: make(chan int)})
+	err := store.WithBoardLock(context.Background(), b.ID, func(ctx context.Context, btx boardtx.Tx) error {
+		_, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "t.bad", Payload: make(chan int)})
 		return err
 	})
 	require.Error(t, err)

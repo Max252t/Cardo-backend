@@ -46,7 +46,6 @@ func TestLoadFromDefaults(t *testing.T) {
 	assert.Equal(t, int32(20), cfg.DBMaxConns)
 	assert.True(t, cfg.MigrateOnStart)
 	assert.Equal(t, "redis://localhost:6379/0", cfg.RedisURL)
-	assert.Equal(t, config.LoginLimiterRedis, cfg.LoginLimiter)
 	assert.Equal(t, 3*time.Second, cfg.ShutdownDrain)
 	assert.Equal(t, 30*time.Second, cfg.DBStatementTimeout)
 	assert.Equal(t, 5*time.Second, cfg.DBLockTimeout)
@@ -207,14 +206,9 @@ func TestLoadFromErrors(t *testing.T) {
 			wantErr: []string{"DB_MAX_CONNS must be at least 2"},
 		},
 		{
-			name:    "redis required by default",
+			name:    "redis required unless single instance",
 			env:     baseEnv(map[string]string{"REDIS_URL": ""}),
-			wantErr: []string{"REDIS_URL is required unless LOGIN_LIMITER=memory"},
-		},
-		{
-			name:    "unknown login limiter",
-			env:     baseEnv(map[string]string{"LOGIN_LIMITER": "file"}),
-			wantErr: []string{"LOGIN_LIMITER must be"},
+			wantErr: []string{"REDIS_URL is required unless SINGLE_INSTANCE=true"},
 		},
 		{
 			name:    "negative timeouts",
@@ -258,15 +252,22 @@ func TestLoadUsesProcessEnvironment(t *testing.T) {
 	assert.Equal(t, ":9999", cfg.HTTPAddr)
 }
 
-func TestLoadFromMemoryLimiterOptIn(t *testing.T) {
+func TestLoadFromSingleInstanceDoesNotRequireRedis(t *testing.T) {
 	t.Parallel()
-	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"REDIS_URL": "", "LOGIN_LIMITER": "Memory"})))
+	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"REDIS_URL": "", "SINGLE_INSTANCE": "true"})))
 	require.NoError(t, err)
-	assert.Equal(t, config.LoginLimiterMemory, cfg.LoginLimiter)
+	assert.True(t, cfg.SingleInstance)
 	assert.Empty(t, cfg.RedisURL)
 
-	cfg, err = config.LoadFrom(env(baseEnv(map[string]string{"LOGIN_LIMITER": "memory"})))
+	cfg, err = config.LoadFrom(env(baseEnv(nil)))
 	require.NoError(t, err)
-	assert.Equal(t, config.LoginLimiterMemory, cfg.LoginLimiter)
+	assert.False(t, cfg.SingleInstance)
 	assert.NotEmpty(t, cfg.RedisURL)
+}
+
+func TestLoadFromRejectsInvalidSingleInstanceFlag(t *testing.T) {
+	t.Parallel()
+	_, err := config.LoadFrom(env(baseEnv(map[string]string{"SINGLE_INSTANCE": "maybe"})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SINGLE_INSTANCE")
 }

@@ -17,30 +17,34 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
-	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
-	"github.com/Max252t/Cardo-backend/internal/pubsub"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
+	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/users"
 )
 
 func main() {
-	if err := run(); err != nil {
-		slog.Error("fatal", slog.Any("error", err))
+	cfg, cfgErr := config.Load()
+	logger := newLogger(cfg)
+	if cfgErr != nil {
+		logger.Error("fatal", slog.Any("error", fmt.Errorf("load config: %w", cfgErr)))
+		os.Exit(1)
+	}
+	if err := run(cfg, logger); err != nil {
+		logger.Error("fatal", slog.Any("error", err))
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
-	slog.SetDefault(logger)
+func newLogger(cfg config.Config) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+}
 
+func run(cfg config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -52,7 +56,7 @@ func run() error {
 	store := storage.New(pool, storage.WithLockTimeout(cfg.DBLockTimeout))
 	readiness := map[string]httpapi.Checker{"postgres": store}
 
-	rdb, err := openRedis(cfg.RedisURL)
+	rdb, err := openRedis(cfg)
 	if err != nil {
 		return err
 	}
@@ -63,7 +67,7 @@ func run() error {
 		})
 	}
 
-	jwtManager := auth.NewJWTManager(auth.JWTConfig{
+	jwtManager := jwtauth.New(jwtauth.Config{
 		Secret:   cfg.JWTSecret,
 		Issuer:   cfg.JWTIssuer,
 		Audience: cfg.JWTAudience,
@@ -71,16 +75,23 @@ func run() error {
 	}, nil)
 	authService := auth.NewService(auth.Deps{
 		Store: store,
-		Hasher: auth.NewArgon2Hasher(auth.DefaultArgon2Params,
-			auth.WithMaxConcurrent(cfg.HashMaxConcurrent),
-			auth.WithAcquireTimeout(cfg.HashAcquireTimeout),
+		Hasher: argon2id.New(argon2id.DefaultParams,
+			argon2id.WithMaxConcurrent(cfg.HashMaxConcurrent),
+			argon2id.WithAcquireTimeout(cfg.HashAcquireTimeout),
 		),
 		Access:     jwtManager,
 		Limiter:    newLoginLimiter(cfg, rdb, logger),
 		RefreshTTL: cfg.RefreshTokenTTL,
 	})
 
+	rt, err := newRealtimeStack(cfg, store, rdb, jwtManager, logger)
+	if err != nil {
+		return fmt.Errorf("build realtime: %w", err)
+	}
+	defer rt.stop()
+
 	lc := newLifecycle()
+	lc.closeSockets = rt.hub.Shutdown
 	defer lc.cancelBase()
 
 	gin.SetMode(gin.ReleaseMode)
@@ -89,7 +100,9 @@ func run() error {
 		Auth:           authService,
 		Tokens:         jwtManager,
 		Users:          users.NewService(store),
-		Boards:         boards.NewService(store, boards.WithPublisher(pubsub.Nop{}), boards.WithLogger(logger)),
+		Boards:         rt.boards,
+		Claims:         jwtManager,
+		Sockets:        rt.hub,
 		Readiness:      readiness,
 		ShuttingDown:   lc.draining.Load,
 		TrustedProxies: cfg.TrustedProxies,
@@ -120,10 +133,11 @@ func openDatabase(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	return pool, nil
 }
 
-func openRedis(redisURL string) (*redis.Client, error) {
-	if redisURL == "" {
+func openRedis(cfg config.Config) (*redis.Client, error) {
+	if cfg.SingleInstance {
 		return nil, nil
 	}
+	redisURL := cfg.RedisURL
 	opts, err := redis.ParseURL(redisURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse redis url: %w", err)
@@ -138,17 +152,18 @@ func closeRedis(rdb *redis.Client, logger *slog.Logger) {
 }
 
 func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) auth.LoginLimiter {
-	if cfg.LoginLimiter == config.LoginLimiterMemory || rdb == nil {
-		logger.Warn("using per-instance in-memory login rate limiter, not suitable for multiple instances")
-		return auth.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
+	if rdb == nil {
+		logger.Warn("SINGLE_INSTANCE is enabled: using the in-memory login rate limiter")
+		return ratelimit.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
 	}
-	return auth.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)
+	return ratelimit.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)
 }
 
 type lifecycle struct {
-	draining   atomic.Bool
-	baseCtx    context.Context
-	cancelBase context.CancelFunc
+	draining     atomic.Bool
+	closeSockets func(ctx context.Context) error
+	baseCtx      context.Context
+	cancelBase   context.CancelFunc
 }
 
 func newLifecycle() *lifecycle {
@@ -199,6 +214,11 @@ func shutdown(srv *http.Server, lc *lifecycle, drain, timeout time.Duration, log
 	logger.Info("shutting down", slog.Duration("timeout", timeout))
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	if lc.closeSockets != nil {
+		if drainErr := lc.closeSockets(shutdownCtx); drainErr != nil {
+			logger.Warn("closing websocket connections timed out", slog.Any("error", drainErr))
+		}
+	}
 	err := srv.Shutdown(shutdownCtx)
 	lc.cancelBase()
 	if err != nil {

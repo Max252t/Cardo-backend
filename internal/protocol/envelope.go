@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
@@ -18,18 +19,8 @@ const (
 	CodeProtocolError = "protocol_error"
 )
 
-const (
-	ReasonVersionConflict = "version_conflict"
-	ReasonNotFound        = "not_found"
-	ReasonForbidden       = "forbidden"
-	ReasonValidation      = "validation_error"
-	ReasonRateLimited     = "rate_limited"
-	ReasonInternal        = "internal"
-)
-
 var (
 	ErrUnsupportedVersion = errors.New("protocol: unsupported version")
-	ErrUnknownType        = errors.New("protocol: unknown message type")
 	ErrMalformed          = errors.New("protocol: malformed message")
 )
 
@@ -42,41 +33,21 @@ type Envelope struct {
 	Payload  json.RawMessage `json:"payload,omitempty"`
 }
 
-type Op struct {
-	Type    string
-	OpID    uuid.UUID
-	Payload json.RawMessage
-}
-
-func ParseOp(data []byte) (Op, error) {
+func ParseOp(data []byte) (boardcontent.Op, error) {
 	var env Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
-		return Op{}, fmt.Errorf("%w: %w", ErrMalformed, err)
+		return boardcontent.Op{}, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	if env.V != Version {
-		return Op{}, fmt.Errorf("%w: %d", ErrUnsupportedVersion, env.V)
+		return boardcontent.Op{}, fmt.Errorf("%w: %d", ErrUnsupportedVersion, env.V)
 	}
-	if !IsOpType(env.Type) {
-		return Op{}, fmt.Errorf("%w: %q", ErrUnknownType, env.Type)
+	if !boardcontent.IsOpType(env.Type) {
+		return boardcontent.Op{}, fmt.Errorf("%w: %q", boardcontent.ErrUnknownType, env.Type)
 	}
 	if env.OpID == nil || *env.OpID == uuid.Nil {
-		return Op{}, fmt.Errorf("%w: op_id is required", ErrMalformed)
+		return boardcontent.Op{}, fmt.Errorf("%w: op_id is required", ErrMalformed)
 	}
-	return Op{Type: env.Type, OpID: *env.OpID, Payload: env.Payload}, nil
-}
-
-func NewOp(opType string, opID uuid.UUID, payload any) (Op, error) {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return Op{}, err
-	}
-	return Op{Type: opType, OpID: opID, Payload: data}, nil
-}
-
-type Nack struct {
-	Reason  string `json:"reason"`
-	AtSeq   int64  `json:"at_seq"`
-	Message string `json:"message"`
+	return boardcontent.Op{Type: env.Type, OpID: *env.OpID, Payload: env.Payload}, nil
 }
 
 func EventEnvelope(ev domain.Event) Envelope {
@@ -90,7 +61,7 @@ func EventEnvelope(ev domain.Event) Envelope {
 	}
 }
 
-func NackEnvelope(opID uuid.UUID, n Nack) (Envelope, error) {
+func NackEnvelope(opID uuid.UUID, n boardcontent.Nack) (Envelope, error) {
 	payload, err := json.Marshal(n)
 	if err != nil {
 		return Envelope{}, err

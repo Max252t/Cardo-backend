@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/ops"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 type replayCase struct {
@@ -27,32 +27,32 @@ type replayWorld struct {
 
 func replayCases() []replayCase {
 	return []replayCase{
-		{"card.create", protocol.OpCardCreate, func(w *replayWorld) any {
-			return protocol.CardCreate{CardID: uuid.New(), ColumnID: w.col, Title: "once"}
+		{"card.create", boardcontent.OpCardCreate, func(w *replayWorld) any {
+			return boardcontent.CardCreate{CardID: uuid.New(), ColumnID: w.col, Title: "once"}
 		}},
-		{"card.edit title", protocol.OpCardEdit, func(w *replayWorld) any {
-			return protocol.CardEdit{CardID: w.card, Title: ptr("renamed once")}
+		{"card.edit title", boardcontent.OpCardEdit, func(w *replayWorld) any {
+			return boardcontent.CardEdit{CardID: w.card, Title: ptr("renamed once")}
 		}},
-		{"card.edit description", protocol.OpCardEdit, func(w *replayWorld) any {
-			return protocol.CardEdit{CardID: w.card, Description: ptr("desc once"), BaseDescriptionVersion: ptr(int64(1))}
+		{"card.edit description", boardcontent.OpCardEdit, func(w *replayWorld) any {
+			return boardcontent.CardEdit{CardID: w.card, Description: ptr("desc once"), BaseDescriptionVersion: ptr(int64(1))}
 		}},
-		{"card.move", protocol.OpCardMove, func(w *replayWorld) any {
-			return protocol.CardMove{CardID: w.card, ToColumnID: w.other, BaseVersion: ptr(int64(1))}
+		{"card.move", boardcontent.OpCardMove, func(w *replayWorld) any {
+			return boardcontent.CardMove{CardID: w.card, ToColumnID: w.other, BaseVersion: ptr(int64(1))}
 		}},
-		{"card.archive", protocol.OpCardArchive, func(w *replayWorld) any {
-			return protocol.CardArchive{CardID: w.card}
+		{"card.archive", boardcontent.OpCardArchive, func(w *replayWorld) any {
+			return boardcontent.CardArchive{CardID: w.card}
 		}},
-		{"column.create", protocol.OpColumnCreate, func(w *replayWorld) any {
-			return protocol.ColumnCreate{ColumnID: uuid.New(), Title: "new column"}
+		{"column.create", boardcontent.OpColumnCreate, func(w *replayWorld) any {
+			return boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: "new column"}
 		}},
-		{"column.rename", protocol.OpColumnRename, func(w *replayWorld) any {
-			return protocol.ColumnRename{ColumnID: w.col, Title: "renamed once"}
+		{"column.rename", boardcontent.OpColumnRename, func(w *replayWorld) any {
+			return boardcontent.ColumnRename{ColumnID: w.col, Title: "renamed once"}
 		}},
-		{"column.move", protocol.OpColumnMove, func(w *replayWorld) any {
-			return protocol.ColumnMove{ColumnID: w.col, AfterID: &w.other, BaseVersion: ptr(int64(1))}
+		{"column.move", boardcontent.OpColumnMove, func(w *replayWorld) any {
+			return boardcontent.ColumnMove{ColumnID: w.col, AfterID: &w.other, BaseVersion: ptr(int64(1))}
 		}},
-		{"column.archive", protocol.OpColumnArchive, func(w *replayWorld) any {
-			return protocol.ColumnArchive{ColumnID: w.col}
+		{"column.archive", boardcontent.OpColumnArchive, func(w *replayWorld) any {
+			return boardcontent.ColumnArchive{ColumnID: w.col}
 		}},
 	}
 }
@@ -117,7 +117,7 @@ func TestSameOperationTenTimesConcurrently(t *testing.T) {
 			publishedBefore := len(f.pub.types())
 
 			const copies = 10
-			results := f.applyConcurrently(t, copies, func(int) (uuid.UUID, protocol.Op) {
+			results := f.applyConcurrently(t, copies, func(int) (uuid.UUID, boardcontent.Op) {
 				return f.owner.ID, mustOp(t, tc.opType, opID, payload)
 			})
 
@@ -146,8 +146,8 @@ func TestSameCreateTenTimesConcurrentlyCreatesOneCard(t *testing.T) {
 	f := newConcurrentFixture(t)
 	col := f.column(t, "Todo", nil)
 	opID, cardID := uuid.New(), uuid.New()
-	results := f.applyConcurrently(t, 10, func(int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardCreate, opID, protocol.CardCreate{CardID: cardID, ColumnID: col, Title: "dedupe"})
+	results := f.applyConcurrently(t, 10, func(int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardCreate, opID, boardcontent.CardCreate{CardID: cardID, ColumnID: col, Title: "dedupe"})
 	})
 	for _, r := range results {
 		require.NotNil(t, r.out.Event)
@@ -160,19 +160,19 @@ func TestReplayedNackIsIdenticalSequentiallyAndConcurrently(t *testing.T) {
 	f := newConcurrentFixture(t)
 	w := newReplayWorld(t, f)
 	opID := uuid.New()
-	payload := protocol.CardMove{CardID: w.card, ToColumnID: w.other, BaseVersion: ptr(int64(5))}
+	payload := boardcontent.CardMove{CardID: w.card, ToColumnID: w.other, BaseVersion: ptr(int64(5))}
 
-	first := f.applyAs(t, f.owner.ID, opID, protocol.OpCardMove, payload)
+	first := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardMove, payload)
 	require.NotNil(t, first.Nack)
-	assert.Equal(t, protocol.ReasonVersionConflict, first.Nack.Reason)
+	assert.Equal(t, boardcontent.ReasonVersionConflict, first.Nack.Reason)
 	assert.False(t, first.Replayed)
 
-	f.mustEvent(t, protocol.OpCardEdit, protocol.CardEdit{CardID: w.card, Title: ptr("moves the seq")})
+	f.mustEvent(t, boardcontent.OpCardEdit, boardcontent.CardEdit{CardID: w.card, Title: ptr("moves the seq")})
 	seq := f.boardSeq(t)
 	require.Greater(t, seq, first.Nack.AtSeq)
 
-	results := f.applyConcurrently(t, 10, func(int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardMove, opID, payload)
+	results := f.applyConcurrently(t, 10, func(int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardMove, opID, payload)
 	})
 	for _, r := range results {
 		require.NotNil(t, r.out.Nack)
@@ -187,11 +187,11 @@ func TestConcurrentCopiesOfAFailingOperationStoreOneNack(t *testing.T) {
 	f := newConcurrentFixture(t)
 	w := newReplayWorld(t, f)
 	opID := uuid.New()
-	payload := protocol.CardMove{CardID: w.card, ToColumnID: w.other, BaseVersion: ptr(int64(5))}
+	payload := boardcontent.CardMove{CardID: w.card, ToColumnID: w.other, BaseVersion: ptr(int64(5))}
 	_, nacksBefore := f.processedOps(t)
 
-	results := f.applyConcurrently(t, 10, func(int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardMove, opID, payload)
+	results := f.applyConcurrently(t, 10, func(int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardMove, opID, payload)
 	})
 	fresh := 0
 	for _, r := range results {
@@ -212,19 +212,19 @@ func TestOpIDReuseByAnotherUserIsRejected(t *testing.T) {
 	opID := uuid.New()
 	cardID := uuid.New()
 
-	first := f.applyAs(t, f.owner.ID, opID, protocol.OpCardCreate, protocol.CardCreate{CardID: cardID, ColumnID: col, Title: "mine"})
+	first := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardID, ColumnID: col, Title: "mine"})
 	require.NotNil(t, first.Event)
 	seq := f.boardSeq(t)
 	published := len(f.pub.types())
 
 	for name, payload := range map[string]any{
-		"same payload":      protocol.CardCreate{CardID: cardID, ColumnID: col, Title: "mine"},
-		"different payload": protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "stolen"},
+		"same payload":      boardcontent.CardCreate{CardID: cardID, ColumnID: col, Title: "mine"},
+		"different payload": boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "stolen"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			out := f.applyAs(t, editor.ID, opID, protocol.OpCardCreate, payload)
+			out := f.applyAs(t, editor.ID, opID, boardcontent.OpCardCreate, payload)
 			require.NotNil(t, out.Nack)
-			assert.Equal(t, protocol.ReasonValidation, out.Nack.Reason)
+			assert.Equal(t, boardcontent.ReasonValidation, out.Nack.Reason)
 			assert.Nil(t, out.Event)
 			assert.False(t, out.Replayed)
 			assert.Equal(t, seq, out.Nack.AtSeq)
@@ -240,7 +240,7 @@ func TestOpIDReuseByAnotherUserIsRejected(t *testing.T) {
 	require.NoError(t, f.pool.QueryRow(context.Background(), `SELECT user_id FROM processed_ops WHERE op_id = $1`, opID).Scan(&owner))
 	assert.Equal(t, f.owner.ID, owner, "the original record is not overwritten")
 
-	again := f.applyAs(t, f.owner.ID, opID, protocol.OpCardCreate, protocol.CardCreate{CardID: cardID, ColumnID: col, Title: "mine"})
+	again := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardID, ColumnID: col, Title: "mine"})
 	require.NotNil(t, again.Event)
 	assert.True(t, again.Replayed)
 	assert.Equal(t, first.Event.Seq, again.Event.Seq)
@@ -252,12 +252,12 @@ func TestOpIDReuseOnAnotherBoardIsRejected(t *testing.T) {
 	otherBoard := f.newBoard(t, f.owner.ID)
 	opID := uuid.New()
 
-	first := f.applyAs(t, f.owner.ID, opID, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: uuid.New(), Title: "here"})
+	first := f.applyAs(t, f.owner.ID, opID, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: "here"})
 	require.NotNil(t, first.Event)
 
-	out := f.applyOnBoard(t, otherBoard, f.owner.ID, opID, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: uuid.New(), Title: "there"})
+	out := f.applyOnBoard(t, otherBoard, f.owner.ID, opID, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: "there"})
 	require.NotNil(t, out.Nack)
-	assert.Equal(t, protocol.ReasonValidation, out.Nack.Reason)
+	assert.Equal(t, boardcontent.ReasonValidation, out.Nack.Reason)
 	assert.Zero(t, out.Nack.AtSeq)
 
 	var cols int
@@ -270,16 +270,16 @@ func TestReplayIgnoresChangedPayload(t *testing.T) {
 	col := f.column(t, "Todo", nil)
 	opID := uuid.New()
 	cardID := uuid.New()
-	first := f.applyAs(t, f.owner.ID, opID, protocol.OpCardCreate, protocol.CardCreate{CardID: cardID, ColumnID: col, Title: "original"})
+	first := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardID, ColumnID: col, Title: "original"})
 	require.NotNil(t, first.Event)
 
-	again := f.applyAs(t, f.owner.ID, opID, protocol.OpCardCreate, protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "different"})
+	again := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "different"})
 	require.NotNil(t, again.Event)
 	assert.True(t, again.Replayed)
 	assert.JSONEq(t, string(first.Event.Payload), string(again.Event.Payload))
 	assert.Equal(t, []uuid.UUID{cardID}, f.cardsInColumn(t, col))
 
-	asEdit := f.applyAs(t, f.owner.ID, opID, protocol.OpCardArchive, protocol.CardArchive{CardID: cardID})
+	asEdit := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardArchive, boardcontent.CardArchive{CardID: cardID})
 	require.NotNil(t, asEdit.Event)
 	assert.True(t, asEdit.Replayed, "an op_id is bound to its first execution regardless of the type sent later")
 	assert.False(t, f.cardRow(t, cardID).Archived)
@@ -294,13 +294,13 @@ func TestReplayOfAnOperationWithRebalanceReturnsOnlyThePrimaryEvent(t *testing.T
 	f.setCardRank(t, last, "a0"+strings.Repeat("0", 62)+"1")
 
 	opID := uuid.New()
-	payload := protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "mid", AfterID: &first, BeforeID: &last}
-	out := f.applyAs(t, f.owner.ID, opID, protocol.OpCardCreate, payload)
+	payload := boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "mid", AfterID: &first, BeforeID: &last}
+	out := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardCreate, payload)
 	require.NotNil(t, out.Event)
 	require.Len(t, out.Extra, 1)
 	published := len(f.pub.types())
 
-	again := f.applyAs(t, f.owner.ID, opID, protocol.OpCardCreate, payload)
+	again := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardCreate, payload)
 	require.NotNil(t, again.Event)
 	assert.True(t, again.Replayed)
 	assert.Equal(t, out.Event.Seq, again.Event.Seq)
@@ -312,12 +312,12 @@ func TestProcessorUsesTheSameBoardLockForReplay(t *testing.T) {
 	f := newFixture(t)
 	col := f.column(t, "Todo", nil)
 	opID := uuid.New()
-	f.applyAs(t, f.owner.ID, opID, protocol.OpCardCreate, protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "x"})
+	f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "x"})
 
 	_, err := f.pool.Exec(context.Background(), `UPDATE boards SET deleted_at = now() WHERE id = $1`, f.board.ID)
 	require.NoError(t, err)
 
-	op := mustOp(t, protocol.OpCardCreate, opID, protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "x"})
+	op := mustOp(t, boardcontent.OpCardCreate, opID, boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "x"})
 	_, err = f.proc.Apply(context.Background(), f.owner.ID, f.board.ID, op)
 	assert.ErrorIs(t, err, domain.ErrNotFound, "a deleted board answers not found even for replays")
 }
@@ -326,7 +326,7 @@ func TestOutcomeAgainstProcessorOptions(t *testing.T) {
 	f := newFixture(t)
 	proc := ops.NewProcessor(f.store, ops.WithPublisher(nil), ops.WithLogger(nil))
 	col := uuid.New()
-	op := mustOp(t, protocol.OpColumnCreate, uuid.New(), protocol.ColumnCreate{ColumnID: col, Title: "nil options are ignored"})
+	op := mustOp(t, boardcontent.OpColumnCreate, uuid.New(), boardcontent.ColumnCreate{ColumnID: col, Title: "nil options are ignored"})
 	out, err := proc.Apply(context.Background(), f.owner.ID, f.board.ID, op)
 	require.NoError(t, err)
 	require.NotNil(t, out.Event)

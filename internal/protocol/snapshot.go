@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
@@ -47,18 +48,18 @@ func FromBoard(b domain.BoardWithRole) BoardInfo {
 }
 
 type Snapshot struct {
-	Board   BoardInfo `json:"board"`
-	Columns []Column  `json:"columns"`
-	Cards   []Card    `json:"cards"`
-	Members []Member  `json:"members"`
-	Seq     int64     `json:"seq"`
+	Board   BoardInfo             `json:"board"`
+	Columns []boardcontent.Column `json:"columns"`
+	Cards   []boardcontent.Card   `json:"cards"`
+	Members []Member              `json:"members"`
+	Seq     int64                 `json:"seq"`
 }
 
 func FromSnapshot(s domain.BoardSnapshot) Snapshot {
 	return Snapshot{
 		Board:   FromBoard(s.Board),
-		Columns: mapSlice(s.Columns, FromColumn),
-		Cards:   mapSlice(s.Cards, FromCard),
+		Columns: mapSlice(s.Columns, boardcontent.FromColumn),
+		Cards:   mapSlice(s.Cards, boardcontent.FromCard),
 		Members: mapSlice(s.Members, FromMember),
 		Seq:     s.Seq,
 	}

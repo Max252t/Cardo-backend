@@ -1,4 +1,4 @@
-package auth_test
+package argon2id_test
 
 import (
 	"context"
@@ -8,12 +8,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Max252t/Cardo-backend/internal/auth"
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 )
 
 func TestArgon2HashFormat(t *testing.T) {
 	t.Parallel()
-	h := auth.NewArgon2Hasher(fastArgon2)
+	h := argon2id.New(fastArgon2)
 	encoded, err := h.Hash(context.Background(), "correct horse")
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(encoded, "$argon2id$v=19$m=8,t=1,p=1$"), encoded)
@@ -23,7 +23,7 @@ func TestArgon2HashFormat(t *testing.T) {
 
 func TestArgon2HashVerify(t *testing.T) {
 	t.Parallel()
-	h := auth.NewArgon2Hasher(fastArgon2)
+	h := argon2id.New(fastArgon2)
 	encoded, err := h.Hash(context.Background(), "correct horse")
 	require.NoError(t, err)
 
@@ -51,7 +51,7 @@ func TestArgon2HashVerify(t *testing.T) {
 
 func TestArgon2HashIsSalted(t *testing.T) {
 	t.Parallel()
-	h := auth.NewArgon2Hasher(fastArgon2)
+	h := argon2id.New(fastArgon2)
 	a, err := h.Hash(context.Background(), "same-password")
 	require.NoError(t, err)
 	b, err := h.Hash(context.Background(), "same-password")
@@ -61,10 +61,10 @@ func TestArgon2HashIsSalted(t *testing.T) {
 
 func TestArgon2VerifyUsesParamsFromEncodedHash(t *testing.T) {
 	t.Parallel()
-	encoded, err := auth.NewArgon2Hasher(fastArgon2).Hash(context.Background(), "pw-pw-pw-pw")
+	encoded, err := argon2id.New(fastArgon2).Hash(context.Background(), "pw-pw-pw-pw")
 	require.NoError(t, err)
 
-	other := auth.NewArgon2Hasher(auth.Argon2Params{Memory: 16, Iterations: 3, Parallelism: 2, SaltLength: 16, KeyLength: 32})
+	other := argon2id.New(argon2id.Params{Memory: 16, Iterations: 3, Parallelism: 2, SaltLength: 16, KeyLength: 32})
 	ok, err := other.Verify(context.Background(), "pw-pw-pw-pw", encoded)
 	require.NoError(t, err)
 	assert.True(t, ok)
@@ -72,7 +72,7 @@ func TestArgon2VerifyUsesParamsFromEncodedHash(t *testing.T) {
 
 func TestArgon2VerifyRejectsMalformedHashes(t *testing.T) {
 	t.Parallel()
-	h := auth.NewArgon2Hasher(fastArgon2)
+	h := argon2id.New(fastArgon2)
 	valid, err := h.Hash(context.Background(), "password")
 	require.NoError(t, err)
 	parts := strings.Split(valid, "$")
@@ -109,7 +109,7 @@ func TestArgon2VerifyRejectsMalformedHashes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ok, err := h.Verify(context.Background(), "password", tt.encoded)
-			assert.ErrorIs(t, err, auth.ErrInvalidHash)
+			assert.ErrorIs(t, err, argon2id.ErrInvalidHash)
 			assert.False(t, ok)
 		})
 	}
@@ -117,10 +117,18 @@ func TestArgon2VerifyRejectsMalformedHashes(t *testing.T) {
 
 func TestArgon2DefaultParamsAreOWASPMinimum(t *testing.T) {
 	t.Parallel()
-	p := auth.DefaultArgon2Params
+	p := argon2id.DefaultParams
 	assert.GreaterOrEqual(t, p.Memory, uint32(19*1024))
 	assert.GreaterOrEqual(t, p.Iterations, uint32(2))
 	assert.GreaterOrEqual(t, p.Parallelism, uint8(1))
 	assert.GreaterOrEqual(t, p.SaltLength, uint32(16))
 	assert.GreaterOrEqual(t, p.KeyLength, uint32(32))
+}
+
+var fastArgon2 = argon2id.Params{
+	Memory:      8,
+	Iterations:  1,
+	Parallelism: 1,
+	SaltLength:  8,
+	KeyLength:   16,
 }

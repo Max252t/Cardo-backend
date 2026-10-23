@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/rank"
 	"github.com/Max252t/Cardo-backend/internal/storage"
@@ -45,7 +46,7 @@ func (c *contentFixture) addMember(t *testing.T, role domain.Role) domain.User {
 func (c *contentFixture) addColumn(t *testing.T, title, rankKey string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	err := c.store.WithBoardLock(context.Background(), c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := c.store.WithBoardLock(context.Background(), c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		_, err := btx.InsertColumn(ctx, domain.Column{ID: id, Title: title, Rank: rankKey})
 		return err
 	})
@@ -55,11 +56,11 @@ func (c *contentFixture) addColumn(t *testing.T, title, rankKey string) uuid.UUI
 
 func (c *contentFixture) addCardWithEvent(ctx context.Context, column uuid.UUID, title, rankKey string) (uuid.UUID, error) {
 	id := uuid.New()
-	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		if _, err := btx.InsertCard(ctx, domain.Card{ID: id, ColumnID: column, Title: title, Rank: rankKey, CreatedBy: c.owner.ID}); err != nil {
 			return err
 		}
-		_, err := btx.AppendEvent(ctx, storage.EventInput{Type: "card.created", Payload: map[string]string{"title": title}, ActorID: &c.owner.ID})
+		_, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "card.created", Payload: map[string]string{"title": title}, ActorID: &c.owner.ID})
 		return err
 	})
 	return id, err
@@ -67,9 +68,9 @@ func (c *contentFixture) addCardWithEvent(ctx context.Context, column uuid.UUID,
 
 func (c *contentFixture) appendEvents(t *testing.T, n int) {
 	t.Helper()
-	err := c.store.WithBoardLock(context.Background(), c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := c.store.WithBoardLock(context.Background(), c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		for i := range n {
-			if _, err := btx.AppendEvent(ctx, storage.EventInput{Type: "test.event", Payload: map[string]int{"n": i}}); err != nil {
+			if _, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "test.event", Payload: map[string]int{"n": i}}); err != nil {
 				return err
 			}
 		}
@@ -373,8 +374,8 @@ func TestEventsAfterReturnsFullEventData(t *testing.T) {
 	c := newContentFixture(t)
 	ctx := context.Background()
 	opID := uuid.New()
-	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		_, err := btx.AppendEvent(ctx, storage.EventInput{Type: "x.y", Payload: map[string]any{"k": "v", "n": 1}, OpID: &opID, ActorID: &c.owner.ID})
+	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
+		_, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "x.y", Payload: map[string]any{"k": "v", "n": 1}, OpID: &opID, ActorID: &c.owner.ID})
 		return err
 	})
 	require.NoError(t, err)
@@ -481,9 +482,9 @@ func TestEventsAfterIsScopedToTheBoard(t *testing.T) {
 	ctx := context.Background()
 	other := createBoard(t, c.store, c.owner.ID, "Other")
 	c.appendEvents(t, 3)
-	err := c.store.WithBoardLock(ctx, other.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := c.store.WithBoardLock(ctx, other.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		for range 7 {
-			if _, err := btx.AppendEvent(ctx, storage.EventInput{Type: "other"}); err != nil {
+			if _, err := btx.AppendEvent(ctx, domain.EventDraft{Type: "other"}); err != nil {
 				return err
 			}
 		}
@@ -531,7 +532,7 @@ func TestBoardContentQueriesHideArchivedAndForeignRows(t *testing.T) {
 	card, err := c.addCardWithEvent(ctx, col, "A", "a0")
 	require.NoError(t, err)
 
-	err = c.store.WithBoardLock(ctx, other.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err = c.store.WithBoardLock(ctx, other.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		_, cerr := btx.Column(ctx, col)
 		assert.ErrorIs(t, cerr, domain.ErrNotFound, "a column of another board is invisible")
 		_, cerr = btx.Card(ctx, card)
@@ -549,7 +550,7 @@ func TestBoardContentQueriesHideArchivedAndForeignRows(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		ranks, cerr := btx.CardRanks(ctx, col)
 		require.NoError(t, cerr)
 		require.Len(t, ranks, 1)
@@ -564,7 +565,7 @@ func TestBoardContentQueriesHideArchivedAndForeignRows(t *testing.T) {
 		assert.ErrorIs(t, cerr, domain.ErrNotFound)
 		_, cerr = btx.ArchiveCard(ctx, card, c.owner.ID)
 		assert.ErrorIs(t, cerr, domain.ErrNotFound)
-		_, cerr = btx.EditCard(ctx, card, c.owner.ID, storage.CardEdit{Title: new("x")})
+		_, cerr = btx.EditCard(ctx, card, c.owner.ID, domain.CardEdit{Title: new("x")})
 		assert.ErrorIs(t, cerr, domain.ErrNotFound)
 		_, cerr = btx.MoveCard(ctx, card, c.owner.ID, col, "a5")
 		assert.ErrorIs(t, cerr, domain.ErrNotFound)
@@ -581,7 +582,7 @@ func TestProcessedOpsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	opID := uuid.New()
 
-	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		_, found, err := btx.ProcessedOp(ctx, opID)
 		require.NoError(t, err)
 		assert.False(t, found)
@@ -614,17 +615,17 @@ func TestSavepointRollsBackOnlyTheInnerWork(t *testing.T) {
 	boom := fmt.Errorf("boom")
 
 	var kept, dropped uuid.UUID
-	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		kept = uuid.New()
 		if _, err := btx.InsertCard(ctx, domain.Card{ID: kept, ColumnID: col, Title: "kept", Rank: "a0", CreatedBy: c.owner.ID}); err != nil {
 			return err
 		}
-		spErr := btx.Savepoint(ctx, func(ctx context.Context, sp *storage.BoardTx) error {
+		spErr := btx.Savepoint(ctx, func(ctx context.Context, sp boardtx.Tx) error {
 			dropped = uuid.New()
 			if _, err := sp.InsertCard(ctx, domain.Card{ID: dropped, ColumnID: col, Title: "dropped", Rank: "a1", CreatedBy: c.owner.ID}); err != nil {
 				return err
 			}
-			if _, err := sp.AppendEvent(ctx, storage.EventInput{Type: "inner"}); err != nil {
+			if _, err := sp.AppendEvent(ctx, domain.EventDraft{Type: "inner"}); err != nil {
 				return err
 			}
 			return boom
@@ -632,8 +633,8 @@ func TestSavepointRollsBackOnlyTheInnerWork(t *testing.T) {
 		require.ErrorIs(t, spErr, boom)
 		assert.Zero(t, btx.Board().Seq, "the outer view of seq is untouched by a rolled back savepoint")
 
-		return btx.Savepoint(ctx, func(ctx context.Context, sp *storage.BoardTx) error {
-			_, err := sp.AppendEvent(ctx, storage.EventInput{Type: "inner.ok"})
+		return btx.Savepoint(ctx, func(ctx context.Context, sp boardtx.Tx) error {
+			_, err := sp.AppendEvent(ctx, domain.EventDraft{Type: "inner.ok"})
 			return err
 		})
 	})
@@ -658,8 +659,8 @@ func TestRerankUsesUniqueIndexSafely(t *testing.T) {
 		ids[i] = id
 	}
 
-	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		return btx.RerankCards(ctx, col, []storage.RankedItem{{ID: ids[0], Rank: "a1"}, {ID: ids[1], Rank: "a2"}, {ID: ids[2], Rank: "a3"}})
+	err := c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
+		return btx.RerankCards(ctx, col, []domain.RankedItem{{ID: ids[0], Rank: "a1"}, {ID: ids[1], Rank: "a2"}, {ID: ids[2], Rank: "a3"}})
 	})
 	require.NoError(t, err, "shifting every rank by one must not trip the unique index")
 
@@ -671,16 +672,16 @@ func TestRerankUsesUniqueIndexSafely(t *testing.T) {
 	}
 	assert.Equal(t, []string{"a1", "a2", "a3"}, got)
 
-	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
-		return btx.RerankCards(ctx, col, []storage.RankedItem{{ID: uuid.New(), Rank: "a9"}})
+	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
+		return btx.RerankCards(ctx, col, []domain.RankedItem{{ID: uuid.New(), Rank: "a9"}})
 	})
 	require.Error(t, err, "reranking a card that is not in the column is an error, not a silent no-op")
 
-	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		return btx.RerankCards(ctx, col, nil)
 	})
 	assert.NoError(t, err)
-	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx *storage.BoardTx) error {
+	err = c.store.WithBoardLock(ctx, c.board.ID, func(ctx context.Context, btx boardtx.Tx) error {
 		return btx.RerankColumns(ctx, nil)
 	})
 	assert.NoError(t, err)

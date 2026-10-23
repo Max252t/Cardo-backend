@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 )
 
 var testEpoch = time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
@@ -37,7 +41,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-var fastArgon2 = auth.Argon2Params{
+var fastArgon2 = argon2id.Params{
 	Memory:      8,
 	Iterations:  1,
 	Parallelism: 1,
@@ -240,4 +244,32 @@ func concurrentLogins(svc *auth.Service, n int, in auth.LoginInput) map[error]in
 	close(start)
 	wg.Wait()
 	return results
+}
+
+func reserve(t *testing.T, l auth.LoginLimiter, key string) auth.Reservation {
+	t.Helper()
+	r, err := l.Reserve(context.Background(), key)
+	require.NoError(t, err)
+	return r
+}
+
+func reserveN(t *testing.T, l auth.LoginLimiter, key string, n int) {
+	t.Helper()
+	for range n {
+		reserve(t, l, key)
+	}
+}
+
+var (
+	jwtSecret = []byte("0123456789abcdef0123456789abcdef")
+	jwtTTL    = 15 * time.Minute
+)
+
+func newJWT(clock auth.Clock) *jwtauth.Manager {
+	return jwtauth.New(jwtauth.Config{
+		Secret:   jwtSecret,
+		Issuer:   "cardo",
+		Audience: "cardo-api",
+		TTL:      jwtTTL,
+	}, clock)
 }

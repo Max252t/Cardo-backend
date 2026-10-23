@@ -117,8 +117,6 @@ func lockTimeoutAsBusy(err error) error {
 	return err
 }
 
-var ErrDuplicateID = errors.New("storage: id already exists")
-
 var entityIDConstraints = map[string]bool{
 	"cards_pkey":              true,
 	"columns_pkey":            true,
@@ -128,7 +126,7 @@ var entityIDConstraints = map[string]bool{
 func duplicateIDError(err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && entityIDConstraints[pgErr.ConstraintName] {
-		return fmt.Errorf("%w: %w", ErrDuplicateID, err)
+		return fmt.Errorf("%w: %w", domain.ErrDuplicateID, err)
 	}
 	return err
 }

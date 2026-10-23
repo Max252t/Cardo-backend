@@ -93,6 +93,11 @@ type ProfileUpdate struct {
 	AvatarColor *string
 }
 
+type AccessClaims struct {
+	UserID    uuid.UUID
+	ExpiresAt time.Time
+}
+
 type RefreshToken struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
@@ -184,4 +189,20 @@ type EventPage struct {
 	Events  []Event
 	Seq     int64
 	HasMore bool
+}
+
+type PresenceUser struct {
+	ID          uuid.UUID
+	Name        string
+	AvatarColor string
+}
+
+type CatchUp struct {
+	Snapshot *BoardSnapshot
+	Events   []Event
+	Seq      int64
+}
+
+func (c CatchUp) IsSnapshot() bool {
+	return c.Snapshot != nil
 }

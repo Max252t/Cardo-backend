@@ -19,11 +19,6 @@ func scanCard(row pgx.Row) (domain.Card, error) {
 	return c, err
 }
 
-type CardEdit struct {
-	Title       *string
-	Description *string
-}
-
 func (b *BoardTx) Card(ctx context.Context, id uuid.UUID) (domain.Card, error) {
 	c, err := scanCard(b.tx.QueryRow(ctx,
 		`SELECT `+cardColumns+` FROM cards WHERE `+activeByIDInBoard,
@@ -37,7 +32,7 @@ func (b *BoardTx) CardIDExists(ctx context.Context, id uuid.UUID) (bool, error) 
 	return exists, err
 }
 
-func (b *BoardTx) CardRanks(ctx context.Context, columnID uuid.UUID) ([]RankedItem, error) {
+func (b *BoardTx) CardRanks(ctx context.Context, columnID uuid.UUID) ([]domain.RankedItem, error) {
 	return queryAll(ctx, b.tx, scanRankedItem,
 		`SELECT id, rank FROM cards WHERE column_id = $1 AND board_id = $2 AND archived_at IS NULL ORDER BY rank, id`,
 		columnID, b.board.ID)
@@ -52,7 +47,7 @@ func (b *BoardTx) InsertCard(ctx context.Context, c domain.Card) (domain.Card, e
 	return card, duplicateIDError(err)
 }
 
-func (b *BoardTx) EditCard(ctx context.Context, id, actorID uuid.UUID, edit CardEdit) (domain.Card, error) {
+func (b *BoardTx) EditCard(ctx context.Context, id, actorID uuid.UUID, edit domain.CardEdit) (domain.Card, error) {
 	c, err := scanCard(b.tx.QueryRow(ctx,
 		`UPDATE cards SET
 		   title = COALESCE($4, title),
@@ -85,7 +80,7 @@ func (b *BoardTx) ArchiveCard(ctx context.Context, id, actorID uuid.UUID) (domai
 	return c, noRowsAsNotFound(err)
 }
 
-func (b *BoardTx) RerankCards(ctx context.Context, columnID uuid.UUID, items []RankedItem) error {
+func (b *BoardTx) RerankCards(ctx context.Context, columnID uuid.UUID, items []domain.RankedItem) error {
 	if len(items) == 0 {
 		return nil
 	}

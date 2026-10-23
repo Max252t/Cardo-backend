@@ -1,0 +1,156 @@
+package presencestore
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/protocol"
+)
+
+const (
+	keyPrefix      = "presence:"
+	profilesSuffix = ":users"
+	DefaultKeyTTL  = 10 * time.Minute
+	scoreExclusive = "("
+	scoreNegInf    = "-inf"
+	scorePosInf    = "+inf"
+)
+
+type RedisStore struct {
+	client *redis.Client
+	keyTTL time.Duration
+}
+
+func NewRedisStore(client *redis.Client) *RedisStore {
+	return &RedisStore{client: client, keyTTL: DefaultKeyTTL}
+}
+
+func scoreKey(boardID uuid.UUID) string {
+	return keyPrefix + boardID.String()
+}
+
+func profilesKey(boardID uuid.UUID) string {
+	return scoreKey(boardID) + profilesSuffix
+}
+
+func toScore(t time.Time) string {
+	return strconv.FormatInt(t.UnixMilli(), 10)
+}
+
+func (r *RedisStore) Put(ctx context.Context, boardID uuid.UUID, members []string, at time.Time) error {
+	if len(members) == 0 {
+		return nil
+	}
+	zs := make([]redis.Z, 0, len(members))
+	for _, m := range members {
+		zs = append(zs, redis.Z{Score: float64(at.UnixMilli()), Member: m})
+	}
+	_, err := r.client.Pipelined(ctx, func(p redis.Pipeliner) error {
+		p.ZAdd(ctx, scoreKey(boardID), zs...)
+		p.Expire(ctx, scoreKey(boardID), r.keyTTL)
+		return nil
+	})
+	return err
+}
+
+func (r *RedisStore) Remove(ctx context.Context, boardID uuid.UUID, members ...string) error {
+	if len(members) == 0 {
+		return nil
+	}
+	args := make([]any, 0, len(members))
+	for _, m := range members {
+		args = append(args, m)
+	}
+	return r.client.ZRem(ctx, scoreKey(boardID), args...).Err()
+}
+
+func (r *RedisStore) Fresh(ctx context.Context, boardID uuid.UUID, after time.Time) ([]string, error) {
+	return r.client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     scoreKey(boardID),
+		ByScore: true,
+		Start:   scoreExclusive + toScore(after),
+		Stop:    scorePosInf,
+	}).Result()
+}
+
+func (r *RedisStore) Stale(ctx context.Context, boardID uuid.UUID, upTo time.Time) ([]string, error) {
+	return r.client.ZRangeArgs(ctx, redis.ZRangeArgs{
+		Key:     scoreKey(boardID),
+		ByScore: true,
+		Start:   scoreNegInf,
+		Stop:    toScore(upTo),
+	}).Result()
+}
+
+func (r *RedisStore) SaveProfiles(ctx context.Context, boardID uuid.UUID, users []domain.PresenceUser) error {
+	if len(users) == 0 {
+		return nil
+	}
+	values := make([]any, 0, len(users)*2)
+	for _, u := range users {
+		data, err := json.Marshal(protocol.FromPresenceUser(u))
+		if err != nil {
+			return fmt.Errorf("marshal presence profile: %w", err)
+		}
+		values = append(values, u.ID.String(), string(data))
+	}
+	_, err := r.client.Pipelined(ctx, func(p redis.Pipeliner) error {
+		p.HSet(ctx, profilesKey(boardID), values...)
+		p.Expire(ctx, profilesKey(boardID), r.keyTTL)
+		return nil
+	})
+	return err
+}
+
+func (r *RedisStore) Profiles(ctx context.Context, boardID uuid.UUID, ids []uuid.UUID) ([]domain.PresenceUser, error) {
+	if len(ids) == 0 {
+		return []domain.PresenceUser{}, nil
+	}
+	raw, err := r.client.HMGet(ctx, profilesKey(boardID), idStrings(ids)...).Result()
+	if err != nil {
+		return nil, err
+	}
+	users := make([]domain.PresenceUser, 0, len(raw))
+	for _, v := range raw {
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		var u protocol.PresenceUser
+		if err := json.Unmarshal([]byte(s), &u); err != nil {
+			continue
+		}
+		users = append(users, u.ToDomain())
+	}
+	return users, nil
+}
+
+func (r *RedisStore) DeleteProfiles(ctx context.Context, boardID uuid.UUID, ids ...uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.client.HDel(ctx, profilesKey(boardID), idStrings(ids)...).Err()
+}
+
+func idStrings(ids []uuid.UUID) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.String())
+	}
+	return out
+}
+
+func marshalProfile(u domain.PresenceUser) (string, error) {
+	data, err := json.Marshal(protocol.FromPresenceUser(u))
+	if err != nil {
+		return "", fmt.Errorf("marshal presence profile: %w", err)
+	}
+	return string(data), nil
+}

@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/ops"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/rank"
 )
 
@@ -39,16 +39,16 @@ func newBoardFlowWithBoard(t *testing.T) *boardFlow {
 	}
 }
 
-func (b *boardFlow) apply(t *testing.T, user session, opType string, payload any) ops.Outcome {
+func (b *boardFlow) apply(t *testing.T, user session, opType string, payload any) boardcontent.OpOutcome {
 	t.Helper()
-	op, err := protocol.NewOp(opType, uuid.New(), payload)
+	op, err := boardcontent.NewOp(opType, uuid.New(), payload)
 	require.NoError(t, err)
 	out, err := b.proc.Apply(context.Background(), uuid.MustParse(user.userID), b.boardID, op)
 	require.NoError(t, err)
 	return out
 }
 
-func (b *boardFlow) mustApply(t *testing.T, opType string, payload any) ops.Outcome {
+func (b *boardFlow) mustApply(t *testing.T, opType string, payload any) boardcontent.OpOutcome {
 	t.Helper()
 	out := b.apply(t, b.owner, opType, payload)
 	require.Nil(t, out.Nack, "unexpected nack %+v", out.Nack)
@@ -71,12 +71,12 @@ func TestFlowSnapshotReflectsOperations(t *testing.T) {
 	todo, done := uuid.New(), uuid.New()
 	cardA, cardB := uuid.New(), uuid.New()
 
-	b.mustApply(t, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: todo, Title: "Todo"})
-	b.mustApply(t, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: done, Title: "Done", AfterID: &todo})
-	b.mustApply(t, protocol.OpCardCreate, protocol.CardCreate{CardID: cardA, ColumnID: todo, Title: "A", Description: new("first card")})
-	b.mustApply(t, protocol.OpCardCreate, protocol.CardCreate{CardID: cardB, ColumnID: todo, Title: "B", BeforeID: &cardA})
-	b.mustApply(t, protocol.OpCardMove, protocol.CardMove{CardID: cardA, ToColumnID: done, BaseVersion: new(int64(1))})
-	b.mustApply(t, protocol.OpCardEdit, protocol.CardEdit{CardID: cardB, Title: new("B2")})
+	b.mustApply(t, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: todo, Title: "Todo"})
+	b.mustApply(t, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: done, Title: "Done", AfterID: &todo})
+	b.mustApply(t, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardA, ColumnID: todo, Title: "A", Description: new("first card")})
+	b.mustApply(t, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardB, ColumnID: todo, Title: "B", BeforeID: &cardA})
+	b.mustApply(t, boardcontent.OpCardMove, boardcontent.CardMove{CardID: cardA, ToColumnID: done, BaseVersion: new(int64(1))})
+	b.mustApply(t, boardcontent.OpCardEdit, boardcontent.CardEdit{CardID: cardB, Title: new("B2")})
 
 	snap := b.mustJSON(t, http.MethodGet, b.path(""), "", b.owner.access, http.StatusOK)
 	assert.EqualValues(t, 6, snap["seq"])
@@ -157,17 +157,17 @@ func TestFlowEventLogMatchesOperationOutcomes(t *testing.T) {
 	b := newBoardFlowWithBoard(t)
 	col, first, last := uuid.New(), uuid.New(), uuid.New()
 
-	b.mustApply(t, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: col, Title: "Todo"})
-	b.mustApply(t, protocol.OpCardCreate, protocol.CardCreate{CardID: first, ColumnID: col, Title: "first"})
-	b.mustApply(t, protocol.OpCardCreate, protocol.CardCreate{CardID: last, ColumnID: col, Title: "last"})
+	b.mustApply(t, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: col, Title: "Todo"})
+	b.mustApply(t, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: first, ColumnID: col, Title: "first"})
+	b.mustApply(t, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: last, ColumnID: col, Title: "last"})
 	_, err := b.pool.Exec(context.Background(), `UPDATE cards SET rank = 'a0' WHERE id = $1`, first)
 	require.NoError(t, err)
 	_, err = b.pool.Exec(context.Background(), `UPDATE cards SET rank = $2 WHERE id = $1`, last, "a0"+strings.Repeat("0", 62)+"1")
 	require.NoError(t, err)
-	out := b.mustApply(t, protocol.OpCardCreate, protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "wedge", AfterID: &first, BeforeID: &last})
+	out := b.mustApply(t, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "wedge", AfterID: &first, BeforeID: &last})
 	require.Len(t, out.Extra, 1, "the wedge insert needs a rebalance")
 
-	nack := b.apply(t, b.owner, protocol.OpCardMove, protocol.CardMove{CardID: first, ToColumnID: col, BaseVersion: new(int64(9))})
+	nack := b.apply(t, b.owner, boardcontent.OpCardMove, boardcontent.CardMove{CardID: first, ToColumnID: col, BaseVersion: new(int64(9))})
 	require.NotNil(t, nack.Nack)
 
 	page := b.mustJSON(t, http.MethodGet, b.path("/events?after_seq=0"), "", b.owner.access, http.StatusOK)
@@ -176,7 +176,7 @@ func TestFlowEventLogMatchesOperationOutcomes(t *testing.T) {
 	events := page["events"].([]any)
 	require.Len(t, events, 5, "a nack never appears in the event log")
 
-	wantTypes := []string{protocol.EventColumnCreated, protocol.EventCardCreated, protocol.EventCardCreated, protocol.EventColumnRebalanced, protocol.EventCardCreated}
+	wantTypes := []string{boardcontent.EventColumnCreated, boardcontent.EventCardCreated, boardcontent.EventCardCreated, boardcontent.EventColumnRebalanced, boardcontent.EventCardCreated}
 	for i, e := range events {
 		ev := e.(map[string]any)
 		assert.EqualValues(t, 1, ev["v"])
@@ -234,7 +234,7 @@ func TestFlowEventLogPaginationAcrossThePageLimit(t *testing.T) {
 
 func TestFlowEventLogQueryValidation(t *testing.T) {
 	b := newBoardFlowWithBoard(t)
-	b.mustApply(t, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: uuid.New(), Title: "Todo"})
+	b.mustApply(t, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: "Todo"})
 
 	bad := []string{"", "?after_seq=", "?after_seq=-1", "?after_seq=abc", "?after_seq=1.5", "?after_seq=0x1", "?after_seq=99999999999999999999", "?after_seq=%20", "?seq=0"}
 	for _, q := range bad {
@@ -251,7 +251,7 @@ func TestFlowEventLogQueryValidation(t *testing.T) {
 func TestFlowEventLogGoneAfterPruning(t *testing.T) {
 	b := newBoardFlowWithBoard(t)
 	for i := range 6 {
-		b.mustApply(t, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: uuid.New(), Title: fmt.Sprintf("c%d", i)})
+		b.mustApply(t, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: fmt.Sprintf("c%d", i)})
 	}
 	_, err := b.pool.Exec(context.Background(), `DELETE FROM board_events WHERE board_id = $1 AND seq <= 3`, b.boardID)
 	require.NoError(t, err)
@@ -272,9 +272,9 @@ func TestFlowEventLogGoneAfterPruning(t *testing.T) {
 func TestFlowSnapshotSeqMatchesEventLogHead(t *testing.T) {
 	b := newBoardFlowWithBoard(t)
 	col := uuid.New()
-	b.mustApply(t, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: col, Title: "Todo"})
+	b.mustApply(t, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: col, Title: "Todo"})
 	for i := range 8 {
-		b.mustApply(t, protocol.OpCardCreate, protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("c%d", i)})
+		b.mustApply(t, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("c%d", i)})
 	}
 	b.mustJSON(t, http.MethodPatch, b.path(""), `{"title":"Renamed"}`, b.owner.access, http.StatusOK)
 

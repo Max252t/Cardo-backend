@@ -1,7 +1,8 @@
-package auth_test
+package jwtauth_test
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 )
 
 var (
@@ -19,8 +21,8 @@ var (
 	jwtTTL    = 15 * time.Minute
 )
 
-func newJWT(clock auth.Clock) *auth.JWTManager {
-	return auth.NewJWTManager(auth.JWTConfig{
+func newJWT(clock auth.Clock) *jwtauth.Manager {
+	return jwtauth.New(jwtauth.Config{
 		Secret:   jwtSecret,
 		Issuer:   "cardo",
 		Audience: "cardo-api",
@@ -102,8 +104,8 @@ func TestJWTExpiry(t *testing.T) {
 	}{
 		{"fresh", 0, nil},
 		{"one second before expiry", jwtTTL - time.Second, nil},
-		{"within clock skew leeway after expiry", jwtTTL + auth.ClockSkewLeeway - time.Second, nil},
-		{"one second after leeway", jwtTTL + auth.ClockSkewLeeway + time.Second, domain.ErrTokenExpired},
+		{"within clock skew leeway after expiry", jwtTTL + jwtauth.ClockSkewLeeway - time.Second, nil},
+		{"one second after leeway", jwtTTL + jwtauth.ClockSkewLeeway + time.Second, domain.ErrTokenExpired},
 		{"long after expiry", 24 * time.Hour, domain.ErrTokenExpired},
 	}
 	for _, tt := range tests {
@@ -247,4 +249,43 @@ func TestJWTToleratesClockSkewBetweenInstances(t *testing.T) {
 	got, err := newJWT(newFakeClock()).Verify(token)
 	require.NoError(t, err)
 	assert.Equal(t, userID, got)
+}
+
+func TestJWTParseReturnsExpiry(t *testing.T) {
+	t.Parallel()
+	m := newJWT(newFakeClock())
+	userID := uuid.New()
+	token, exp, err := m.Issue(userID)
+	require.NoError(t, err)
+
+	claims, err := m.Parse(token)
+	require.NoError(t, err)
+	assert.Equal(t, userID, claims.UserID)
+	assert.True(t, exp.Equal(claims.ExpiresAt))
+
+	_, err = m.Parse("garbage")
+	require.ErrorIs(t, err, domain.ErrTokenInvalid)
+}
+
+var testEpoch = time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: testEpoch}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
 }
