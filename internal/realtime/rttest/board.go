@@ -114,8 +114,9 @@ func (b *Board) Append(ctx context.Context, eventType string, payload any, actor
 	}
 	b.mu.Lock()
 	ev := b.appendLocked(eventType, data, nil, actor)
+	err = b.publish(ctx, ev)
 	b.mu.Unlock()
-	return ev, b.publish(ctx, ev)
+	return ev, err
 }
 
 func (b *Board) Delete(ctx context.Context, actor uuid.UUID) (domain.Event, error) {
@@ -126,8 +127,9 @@ func (b *Board) Delete(ctx context.Context, actor uuid.UUID) (domain.Event, erro
 	b.mu.Lock()
 	ev := b.appendLocked(domain.EventBoardDeleted, data, nil, actor)
 	b.deleted = true
+	err = b.publish(ctx, ev)
 	b.mu.Unlock()
-	return ev, b.publish(ctx, ev)
+	return ev, err
 }
 
 func (b *Board) publish(ctx context.Context, ev domain.Event) error {
@@ -172,8 +174,9 @@ func (b *Board) Apply(ctx context.Context, userID, _ uuid.UUID, op boardcontent.
 	opID := op.OpID
 	ev := b.appendLocked(strings.TrimPrefix(op.Type, "op."), op.Payload, &opID, userID)
 	b.processed[op.OpID] = ev
+	err := b.publish(ctx, ev)
 	b.mu.Unlock()
-	return boardcontent.OpOutcome{Event: &ev}, b.publish(ctx, ev)
+	return boardcontent.OpOutcome{Event: &ev}, err
 }
 
 func (b *Board) Snapshot(_ context.Context, userID, _ uuid.UUID) (domain.BoardSnapshot, error) {
