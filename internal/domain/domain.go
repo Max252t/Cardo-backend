@@ -196,3 +196,13 @@ type PresenceUser struct {
 	Name        string
 	AvatarColor string
 }
+
+type CatchUp struct {
+	Snapshot *BoardSnapshot
+	Events   []Event
+	Seq      int64
+}
+
+func (c CatchUp) IsSnapshot() bool {
+	return c.Snapshot != nil
+}

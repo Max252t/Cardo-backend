@@ -2,84 +2,49 @@ package realtime
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
 
+	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 func (c *Client) catchUp(ctx context.Context, lastSeq *int64) (int64, error) {
-	if lastSeq != nil {
-		events, ok, err := c.collectDelta(ctx, *lastSeq)
-		if err != nil {
-			return 0, err
-		}
-		if ok {
-			return c.sendDelta(*lastSeq, events)
-		}
+	res, err := boards.CatchUp(ctx, c.hub.sync, c.member.UserID, c.boardID, lastSeq, boards.CatchUpLimits{MaxEvents: c.hub.cfg.MaxDeltaEvents})
+	if err != nil {
+		return 0, err
 	}
-	return c.sendSnapshot(ctx)
+	if res.IsSnapshot() {
+		return res.Seq, c.sendSnapshot(*res.Snapshot)
+	}
+	return res.Seq, c.sendDelta(res.Events)
 }
 
-func (c *Client) collectDelta(ctx context.Context, lastSeq int64) ([]domain.Event, bool, error) {
-	var events []domain.Event
-	after := lastSeq
-	for {
-		page, err := c.hub.sync.Events(ctx, c.member.UserID, c.boardID, after)
-		var vErr *domain.ValidationError
-		switch {
-		case errors.Is(err, domain.ErrGone), errors.As(err, &vErr):
-			return nil, false, nil
-		case err != nil:
-			return nil, false, fmt.Errorf("load events after %d: %w", after, err)
-		}
-		events = append(events, page.Events...)
-		if len(events) > c.hub.cfg.MaxDeltaEvents {
-			return nil, false, nil
-		}
-		if !page.HasMore {
-			return events, true, nil
-		}
-		if len(page.Events) == 0 {
-			return nil, false, nil
-		}
-		after = page.Events[len(page.Events)-1].Seq
-	}
-}
-
-func (c *Client) sendDelta(lastSeq int64, events []domain.Event) (int64, error) {
-	sentSeq := lastSeq
+func (c *Client) sendDelta(events []domain.Event) error {
 	chunk := c.hub.cfg.DeltaChunk
 	for start := 0; start == 0 || start < len(events); start += chunk {
 		end := min(start+chunk, len(events))
 		batch := make([]protocol.Envelope, 0, end-start)
 		for _, ev := range events[start:end] {
 			batch = append(batch, protocol.EventEnvelope(ev))
-			sentSeq = max(sentSeq, ev.Seq)
 		}
 		data, err := protocol.Encode(protocol.TypeSyncDelta, protocol.SyncDelta{Events: batch})
 		if err != nil {
-			return 0, err
+			return err
 		}
 		c.enqueue(data)
 	}
-	return sentSeq, nil
+	return nil
 }
 
-func (c *Client) sendSnapshot(ctx context.Context) (int64, error) {
-	snap, err := c.hub.sync.Snapshot(ctx, c.member.UserID, c.boardID)
-	if err != nil {
-		return 0, fmt.Errorf("load snapshot: %w", err)
-	}
+func (c *Client) sendSnapshot(snap domain.BoardSnapshot) error {
 	c.setRole(snap.Board.Role)
 	data, err := protocol.Encode(protocol.TypeSyncSnapshot, protocol.FromSnapshot(snap))
 	if err != nil {
-		return 0, err
+		return err
 	}
 	c.enqueue(data)
-	return snap.Seq, nil
+	return nil
 }
 
 func (c *Client) sendPresenceList(ctx context.Context) {
