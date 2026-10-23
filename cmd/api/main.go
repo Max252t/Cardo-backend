@@ -28,20 +28,23 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
-		slog.Error("fatal", slog.Any("error", err))
+	cfg, cfgErr := config.Load()
+	logger := newLogger(cfg)
+	if cfgErr != nil {
+		logger.Error("fatal", slog.Any("error", fmt.Errorf("load config: %w", cfgErr)))
+		os.Exit(1)
+	}
+	if err := run(cfg, logger); err != nil {
+		logger.Error("fatal", slog.Any("error", err))
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
-	slog.SetDefault(logger)
+func newLogger(cfg config.Config) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+}
 
+func run(cfg config.Config, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
