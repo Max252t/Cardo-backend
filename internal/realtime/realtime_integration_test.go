@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/ops"
@@ -48,40 +49,40 @@ func TestRealtimeFlowAgainstPostgresAcrossTwoInstances(t *testing.T) {
 
 	columnID := uuid.New()
 	columnOp := uuid.New()
-	first.SendJSON(protocol.OpColumnCreate, &columnOp, protocol.ColumnCreate{ColumnID: columnID, Title: "Todo"})
+	first.SendJSON(boardcontent.OpColumnCreate, &columnOp, boardcontent.ColumnCreate{ColumnID: columnID, Title: "Todo"})
 	for _, c := range []*rttest.Conn{first, second} {
-		ev := drainUntil(c, protocol.EventColumnCreated)
+		ev := drainUntil(c, boardcontent.EventColumnCreated)
 		assert.Equal(t, int64(1), ev.Seq)
 		require.NotNil(t, ev.OpID)
 		assert.Equal(t, columnOp, *ev.OpID)
 	}
 
 	cardOp := uuid.New()
-	first.SendJSON(protocol.OpCardCreate, &cardOp, protocol.CardCreate{CardID: uuid.New(), ColumnID: columnID, Title: "Write tests"})
+	first.SendJSON(boardcontent.OpCardCreate, &cardOp, boardcontent.CardCreate{CardID: uuid.New(), ColumnID: columnID, Title: "Write tests"})
 	for _, c := range []*rttest.Conn{first, second} {
-		assert.Equal(t, int64(2), drainUntil(c, protocol.EventCardCreated).Seq)
+		assert.Equal(t, int64(2), drainUntil(c, boardcontent.EventCardCreated).Seq)
 	}
 
 	missing := uuid.New()
 	badOp := uuid.New()
-	first.SendJSON(protocol.OpCardArchive, &badOp, protocol.CardArchive{CardID: missing})
-	var nack protocol.Nack
+	first.SendJSON(boardcontent.OpCardArchive, &badOp, boardcontent.CardArchive{CardID: missing})
+	var nack boardcontent.Nack
 	require.NoError(t, json.Unmarshal(drainUntil(first, protocol.TypeNack).Payload, &nack))
-	assert.Equal(t, protocol.ReasonNotFound, nack.Reason)
+	assert.Equal(t, boardcontent.ReasonNotFound, nack.Reason)
 
 	late := env.DialBoard(t, b, boardID, owner.ID)
 	late.Hello(int64Ptr(1))
 	var delta protocol.SyncDelta
 	require.NoError(t, json.Unmarshal(late.Expect(protocol.TypeSyncDelta).Payload, &delta))
 	require.Len(t, delta.Events, 1)
-	assert.Equal(t, protocol.EventCardCreated, delta.Events[0].Type)
+	assert.Equal(t, boardcontent.EventCardCreated, delta.Events[0].Type)
 	late.Expect(protocol.TypePresenceList)
 	late.Expect(protocol.TypeSyncReady)
 
 	_, err = boardService.Delete(ctx, owner.ID, boardID)
 	require.NoError(t, err)
 	for _, c := range []*rttest.Conn{first, second, late} {
-		assert.Equal(t, protocol.EventBoardDeleted, drainUntil(c, protocol.EventBoardDeleted).Type)
+		assert.Equal(t, boardcontent.EventBoardDeleted, drainUntil(c, boardcontent.EventBoardDeleted).Type)
 		assert.Equal(t, protocol.CloseBoardDeleted, c.ExpectClose().Code)
 	}
 }

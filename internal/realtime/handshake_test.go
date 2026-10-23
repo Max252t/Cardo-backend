@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
@@ -267,13 +268,13 @@ func TestEventsPublishedDuringSnapshotHandshakeAreDeliveredExactlyOnceInOrder(t 
 		if msg.Type == protocol.TypeSyncReady {
 			break
 		}
-		if msg.Type == protocol.EventCardCreated {
+		if msg.Type == boardcontent.EventCardCreated {
 			delivered = append(delivered, msg.Seq)
 		}
 	}
 	background.Wait()
 	final := appendEvents(t, env, ann, 1)[0]
-	delivered = append(delivered, readEventSeqs(t, c, protocol.EventCardCreated, final)...)
+	delivered = append(delivered, readEventSeqs(t, c, boardcontent.EventCardCreated, final)...)
 
 	requireContiguous(t, delivered, snap.Seq+1, final)
 }
@@ -307,12 +308,12 @@ func TestEventsPublishedDuringDeltaHandshakeAreDeliveredExactlyOnceInOrder(t *te
 		if msg.Type == protocol.TypeSyncReady {
 			break
 		}
-		if msg.Type == protocol.EventCardCreated {
+		if msg.Type == boardcontent.EventCardCreated {
 			seqs = append(seqs, msg.Seq)
 		}
 	}
 	final := appendEvents(t, env, ann, 1)[0]
-	seqs = append(seqs, readEventSeqs(t, c, protocol.EventCardCreated, final)...)
+	seqs = append(seqs, readEventSeqs(t, c, boardcontent.EventCardCreated, final)...)
 	requireContiguous(t, seqs, 3, final)
 }
 
@@ -342,7 +343,7 @@ func TestLiveEventsAreHeldBackUntilThePresenceListAndPrecedeSyncReady(t *testing
 	c.Hello(nil)
 	<-reached
 	appendEvents(t, env, ann, 4)
-	readEventSeqs(t, obs, protocol.EventCardCreated, 5)
+	readEventSeqs(t, obs, boardcontent.EventCardCreated, 5)
 	close(release)
 
 	var order []string
@@ -350,7 +351,7 @@ func TestLiveEventsAreHeldBackUntilThePresenceListAndPrecedeSyncReady(t *testing
 	for {
 		msg := c.MustNext()
 		order = append(order, msg.Type)
-		if msg.Type == protocol.EventCardCreated {
+		if msg.Type == boardcontent.EventCardCreated {
 			beforeReady = append(beforeReady, msg.Seq)
 		}
 		if msg.Type == protocol.TypeSyncReady {
@@ -363,7 +364,7 @@ func TestLiveEventsAreHeldBackUntilThePresenceListAndPrecedeSyncReady(t *testing
 	require.GreaterOrEqual(t, len(beforeReady), 3)
 	assert.Equal(t, []int64{2, 3, 4}, beforeReady[:3], "events buffered during the handshake are flushed before sync.ready")
 	if len(beforeReady) == 3 {
-		assert.Equal(t, []int64{5}, readEventSeqs(t, c, protocol.EventCardCreated, 5))
+		assert.Equal(t, []int64{5}, readEventSeqs(t, c, boardcontent.EventCardCreated, 5))
 	} else {
 		assert.Equal(t, []int64{2, 3, 4, 5}, beforeReady)
 	}
@@ -388,7 +389,7 @@ func TestOperationDuringHandshakeIsAProtocolErrorAndNotApplied(t *testing.T) {
 	c := inst.Dial(t, ann)
 	c.Hello(nil)
 	<-reached
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	assert.Equal(t, protocol.CodeProtocolError, errorCode(t, c.MustNext()))
 	close(release)
 	c.Expect(protocol.TypeSyncSnapshot)
@@ -396,7 +397,7 @@ func TestOperationDuringHandshakeIsAProtocolErrorAndNotApplied(t *testing.T) {
 	c.Expect(protocol.TypeSyncReady)
 	assert.Zero(t, env.Board.ApplyCount())
 
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 }
 
@@ -405,8 +406,8 @@ func TestOperationBeforeHelloIsAProtocolErrorForEveryOpType(t *testing.T) {
 	env, ann, inst := newEditorEnv(t, func(e *rttest.Env) { e.Config = realtime.Config{MaxProtocolViolations: 100} })
 	c := inst.Dial(t, ann)
 	for _, opType := range []string{
-		protocol.OpCardCreate, protocol.OpCardEdit, protocol.OpCardMove, protocol.OpCardArchive,
-		protocol.OpColumnCreate, protocol.OpColumnRename, protocol.OpColumnMove, protocol.OpColumnArchive,
+		boardcontent.OpCardCreate, boardcontent.OpCardEdit, boardcontent.OpCardMove, boardcontent.OpCardArchive,
+		boardcontent.OpColumnCreate, boardcontent.OpColumnRename, boardcontent.OpColumnMove, boardcontent.OpColumnArchive,
 	} {
 		sendOp(c, opType)
 		assert.Equal(t, protocol.CodeProtocolError, errorCode(t, c.MustNext()), opType)
@@ -435,7 +436,7 @@ func TestHandshakeFailuresCloseWithTheMatchingCode(t *testing.T) {
 			c := inst.Dial(t, ann)
 			c.Hello(nil)
 			if tt.wantError {
-				assert.Equal(t, protocol.ReasonInternal, errorCode(t, c.MustNext()))
+				assert.Equal(t, boardcontent.ReasonInternal, errorCode(t, c.MustNext()))
 			}
 			assert.Equal(t, tt.wantCode, c.ExpectClose().Code)
 			waitConnections(t, inst, env.Board.ID, 0)
@@ -451,7 +452,7 @@ func TestHandshakeFailureDuringDeltaClosesToo(t *testing.T) {
 	inst := env.StartInstance(t, "late")
 	c := inst.Dial(t, ann)
 	c.Hello(int64Ptr(1))
-	assert.Equal(t, protocol.ReasonInternal, errorCode(t, c.MustNext()))
+	assert.Equal(t, boardcontent.ReasonInternal, errorCode(t, c.MustNext()))
 	assert.Equal(t, websocket.CloseInternalServerErr, c.ExpectClose().Code)
 }
 
@@ -481,7 +482,7 @@ func TestPendingBufferOverflowDuringHandshakeClosesWithSlowClientCode(t *testing
 	c.Hello(nil)
 	<-reached
 	appendEvents(t, env, ann, 4)
-	readEventSeqs(t, obs, protocol.EventCardCreated, 4)
+	readEventSeqs(t, obs, boardcontent.EventCardCreated, 4)
 	close(release)
 	assert.Equal(t, protocol.CloseSlowClient, c.ExpectClose().Code)
 	waitConnections(t, inst, env.Board.ID, 1)

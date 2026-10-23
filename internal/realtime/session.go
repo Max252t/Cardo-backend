@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -27,7 +28,7 @@ func (c *Client) handle(data []byte) {
 	case protocol.TypeAuthRefresh:
 		c.onRefresh(env)
 	default:
-		if protocol.IsOpType(env.Type) {
+		if boardcontent.IsOpType(env.Type) {
 			c.onOp(env)
 			return
 		}
@@ -67,7 +68,7 @@ func (c *Client) sendMessage(msgType string, payload any) {
 	c.enqueue(data)
 }
 
-func (c *Client) sendNack(opID uuid.UUID, nack protocol.Nack) {
+func (c *Client) sendNack(opID uuid.UUID, nack boardcontent.Nack) {
 	env, err := protocol.NackEnvelope(opID, nack)
 	if err != nil {
 		c.hub.logger.Error("encode nack failed", c.logAttrs(slog.Any("error", err))...)
@@ -77,7 +78,7 @@ func (c *Client) sendNack(opID uuid.UUID, nack protocol.Nack) {
 }
 
 func (c *Client) localNack(opID uuid.UUID, reason, message string) {
-	c.sendNack(opID, protocol.Nack{Reason: reason, AtSeq: c.latestSeq.Load(), Message: message})
+	c.sendNack(opID, boardcontent.Nack{Reason: reason, AtSeq: c.latestSeq.Load(), Message: message})
 }
 
 func (c *Client) onHello(env protocol.Envelope) {
@@ -158,14 +159,14 @@ func (c *Client) onOp(env protocol.Envelope) {
 		return
 	}
 	if !c.allowOp() {
-		c.localNack(op.OpID, protocol.ReasonRateLimited, "too many operations, slow down")
+		c.localNack(op.OpID, boardcontent.ReasonRateLimited, "too many operations, slow down")
 		if c.rateAbuse() {
 			c.closeWith(protocol.CloseRateLimited, "rate limit exceeded")
 		}
 		return
 	}
 	if !c.Role().AtLeast(domain.RoleEditor) {
-		c.localNack(op.OpID, protocol.ReasonForbidden, msgRoleForbidsChanges)
+		c.localNack(op.OpID, boardcontent.ReasonForbidden, msgRoleForbidsChanges)
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, c.hub.cfg.OpTimeout)
@@ -174,7 +175,7 @@ func (c *Client) onOp(env protocol.Envelope) {
 	c.finishOp(op, out, err)
 }
 
-func (c *Client) finishOp(op protocol.Op, out protocol.OpOutcome, err error) {
+func (c *Client) finishOp(op boardcontent.Op, out boardcontent.OpOutcome, err error) {
 	switch {
 	case err == nil:
 		c.deliverOutcome(op, out)
@@ -182,22 +183,22 @@ func (c *Client) finishOp(op protocol.Op, out protocol.OpOutcome, err error) {
 	case errors.Is(err, domain.ErrNotFound):
 		c.closeWith(protocol.CloseBoardDeleted, "board not found")
 	case errors.Is(err, domain.ErrForbidden):
-		c.localNack(op.OpID, protocol.ReasonForbidden, msgRoleForbidsChanges)
+		c.localNack(op.OpID, boardcontent.ReasonForbidden, msgRoleForbidsChanges)
 	default:
 		var vErr *domain.ValidationError
 		if errors.As(err, &vErr) {
-			c.localNack(op.OpID, protocol.ReasonValidation, vErr.Error())
+			c.localNack(op.OpID, boardcontent.ReasonValidation, vErr.Error())
 			return
 		}
 		c.hub.logger.Error("apply operation failed", c.logAttrs(
 			slog.String("op_id", op.OpID.String()),
 			slog.String("op_type", op.Type),
 			slog.Any("error", err))...)
-		c.localNack(op.OpID, protocol.ReasonInternal, "temporary server error, retry with the same op_id")
+		c.localNack(op.OpID, boardcontent.ReasonInternal, "temporary server error, retry with the same op_id")
 	}
 }
 
-func (c *Client) deliverOutcome(op protocol.Op, out protocol.OpOutcome) {
+func (c *Client) deliverOutcome(op boardcontent.Op, out boardcontent.OpOutcome) {
 	switch {
 	case out.Nack != nil:
 		c.sendNack(op.OpID, *out.Nack)
@@ -234,7 +235,7 @@ func (c *Client) failHandshake(err error) {
 		c.closeWith(protocol.CloseAccessRevoked, "access revoked")
 	default:
 		c.hub.logger.Error("websocket handshake failed", c.logAttrs(slog.Any("error", err))...)
-		c.sendError(protocol.ReasonInternal, "synchronization failed, reconnect")
+		c.sendError(boardcontent.ReasonInternal, "synchronization failed, reconnect")
 		c.closeWith(websocket.CloseInternalServerErr, "sync failed")
 	}
 }

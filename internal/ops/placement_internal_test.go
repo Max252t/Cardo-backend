@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 func items(ranks ...string) []domain.RankedItem {
@@ -97,7 +97,7 @@ func TestPlaceRejectsSelfAnchors(t *testing.T) {
 		_, err := place(list, self, tc.after, tc.before)
 		var rej *rejection
 		require.ErrorAs(t, err, &rej)
-		assert.Equal(t, protocol.ReasonValidation, rej.reason)
+		assert.Equal(t, boardcontent.ReasonValidation, rej.reason)
 		assert.Contains(t, rej.message, tc.field)
 	}
 }

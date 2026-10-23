@@ -5,11 +5,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 func TestSameEntityIDCreatedConcurrentlyOnTwoBoards(t *testing.T) {
@@ -18,7 +17,7 @@ func TestSameEntityIDCreatedConcurrentlyOnTwoBoards(t *testing.T) {
 	boardB := f.newBoard(t, f.owner.ID)
 	colA, colB := uuid.New(), uuid.New()
 	for board, col := range map[uuid.UUID]uuid.UUID{boardA: colA, boardB: colB} {
-		out := f.applyOnBoard(t, board, f.owner.ID, uuid.New(), protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: col, Title: "Todo"})
+		out := f.applyOnBoard(t, board, f.owner.ID, uuid.New(), boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: col, Title: "Todo"})
 		require.NotNil(t, out.Event)
 	}
 
@@ -33,7 +32,7 @@ func TestSameEntityIDCreatedConcurrentlyOnTwoBoards(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				op := mustOp(t, protocol.OpCardCreate, uuid.New(), protocol.CardCreate{CardID: cardID, ColumnID: target.col, Title: "same id"})
+				op := mustOp(t, boardcontent.OpCardCreate, uuid.New(), boardcontent.CardCreate{CardID: cardID, ColumnID: target.col, Title: "same id"})
 				out, err := f.proc.Apply(context.Background(), f.owner.ID, target.board, op)
 				outcomes[i] = result{out: out, err: err}
 			}()
@@ -49,7 +48,7 @@ func TestSameEntityIDCreatedConcurrentlyOnTwoBoards(t *testing.T) {
 			}
 			require.NoError(t, r.err, "round %d: the loser must receive a nack, not an error", round)
 			require.NotNil(t, r.out.Nack)
-			assert.Equal(t, protocol.ReasonValidation, r.out.Nack.Reason)
+			assert.Equal(t, boardcontent.ReasonValidation, r.out.Nack.Reason)
 		}
 		assert.Equal(t, 1, created, "exactly one board may own the card id")
 	}
@@ -60,8 +59,8 @@ func TestSameColumnIDCreatedConcurrentlyOnTwoBoards(t *testing.T) {
 	boards := []uuid.UUID{f.board.ID, f.newBoard(t, f.owner.ID)}
 	for round := range 10 {
 		colID := uuid.New()
-		results := applyAcrossBoards(f, boards, func(int) (uuid.UUID, protocol.Op) {
-			return f.owner.ID, mustOp(t, protocol.OpColumnCreate, uuid.New(), protocol.ColumnCreate{ColumnID: colID, Title: "same"})
+		results := applyAcrossBoards(f, boards, func(int) (uuid.UUID, boardcontent.Op) {
+			return f.owner.ID, mustOp(t, boardcontent.OpColumnCreate, uuid.New(), boardcontent.ColumnCreate{ColumnID: colID, Title: "same"})
 		})
 		created := 0
 		for _, r := range results {
@@ -71,7 +70,7 @@ func TestSameColumnIDCreatedConcurrentlyOnTwoBoards(t *testing.T) {
 				continue
 			}
 			require.NotNil(t, r.out.Nack)
-			assert.Equal(t, protocol.ReasonValidation, r.out.Nack.Reason)
+			assert.Equal(t, boardcontent.ReasonValidation, r.out.Nack.Reason)
 			assert.Equal(t, "column_id: is not available", r.out.Nack.Message)
 		}
 		assert.Equal(t, 1, created, "round %d", round)
@@ -83,8 +82,8 @@ func TestSameOpIDSentConcurrentlyToTwoBoards(t *testing.T) {
 	boards := []uuid.UUID{f.board.ID, f.newBoard(t, f.owner.ID)}
 	for round := range 15 {
 		opID := uuid.New()
-		results := applyAcrossBoards(f, boards, func(int) (uuid.UUID, protocol.Op) {
-			return f.owner.ID, mustOp(t, protocol.OpColumnCreate, opID, protocol.ColumnCreate{ColumnID: uuid.New(), Title: "race"})
+		results := applyAcrossBoards(f, boards, func(int) (uuid.UUID, boardcontent.Op) {
+			return f.owner.ID, mustOp(t, boardcontent.OpColumnCreate, opID, boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: "race"})
 		})
 		applied := 0
 		for _, r := range results {
@@ -94,7 +93,7 @@ func TestSameOpIDSentConcurrentlyToTwoBoards(t *testing.T) {
 				continue
 			}
 			require.NotNil(t, r.out.Nack)
-			assert.Equal(t, protocol.ReasonValidation, r.out.Nack.Reason)
+			assert.Equal(t, boardcontent.ReasonValidation, r.out.Nack.Reason)
 			assert.Contains(t, r.out.Nack.Message, "op_id")
 		}
 		assert.Equal(t, 1, applied, "round %d: exactly one board applies the op", round)
@@ -113,21 +112,21 @@ func TestDuplicateIDNackDoesNotRevealOtherBoards(t *testing.T) {
 	other := f.newBoard(t, f.owner.ID)
 	colHere := f.column(t, "Here", nil)
 	colThere := uuid.New()
-	require.NotNil(t, f.applyOnBoard(t, other, f.owner.ID, uuid.New(), protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: colThere, Title: "There"}).Event)
+	require.NotNil(t, f.applyOnBoard(t, other, f.owner.ID, uuid.New(), boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: colThere, Title: "There"}).Event)
 	cardThere := uuid.New()
-	require.NotNil(t, f.applyOnBoard(t, other, f.owner.ID, uuid.New(), protocol.OpCardCreate, protocol.CardCreate{CardID: cardThere, ColumnID: colThere, Title: "x"}).Event)
+	require.NotNil(t, f.applyOnBoard(t, other, f.owner.ID, uuid.New(), boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardThere, ColumnID: colThere, Title: "x"}).Event)
 	cardHere := f.card(t, colHere, "here")
 
-	sameBoard := f.mustNack(t, protocol.ReasonValidation, protocol.OpCardCreate, protocol.CardCreate{CardID: cardHere, ColumnID: colHere, Title: "dup"})
-	otherBoard := f.mustNack(t, protocol.ReasonValidation, protocol.OpCardCreate, protocol.CardCreate{CardID: cardThere, ColumnID: colHere, Title: "dup"})
+	sameBoard := f.mustNack(t, boardcontent.ReasonValidation, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardHere, ColumnID: colHere, Title: "dup"})
+	otherBoard := f.mustNack(t, boardcontent.ReasonValidation, boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardThere, ColumnID: colHere, Title: "dup"})
 	assert.Equal(t, sameBoard.Message, otherBoard.Message)
 	assert.Equal(t, "card_id: is not available", otherBoard.Message)
 
-	colNack := f.mustNack(t, protocol.ReasonValidation, protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: colThere, Title: "dup"})
+	colNack := f.mustNack(t, boardcontent.ReasonValidation, boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: colThere, Title: "dup"})
 	assert.Equal(t, "column_id: is not available", colNack.Message)
 }
 
-func applyAcrossBoards(f *fixture, boards []uuid.UUID, build func(i int) (uuid.UUID, protocol.Op)) []result {
+func applyAcrossBoards(f *fixture, boards []uuid.UUID, build func(i int) (uuid.UUID, boardcontent.Op)) []result {
 	results := make([]result, len(boards))
 	var wg sync.WaitGroup
 	start := make(chan struct{})

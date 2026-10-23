@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 type Store interface {
@@ -54,18 +54,18 @@ func NewProcessor(store Store, opts ...Option) *Processor {
 	return p
 }
 
-func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
+func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {
 	if op.OpID == uuid.Nil {
-		return protocol.OpOutcome{}, domain.NewValidationError("op_id", "is required")
+		return boardcontent.OpOutcome{}, domain.NewValidationError("op_id", "is required")
 	}
-	var out protocol.OpOutcome
+	var out boardcontent.OpOutcome
 	err := p.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
 		var err error
 		out, err = applyLocked(ctx, btx, userID, op)
 		return err
 	})
 	if err != nil {
-		return protocol.OpOutcome{}, err
+		return boardcontent.OpOutcome{}, err
 	}
 	if out.Event != nil && !out.Replayed {
 		events := out.Events()
@@ -78,10 +78,10 @@ func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op pro
 	return out, nil
 }
 
-func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
+func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {
 	prev, found, err := btx.ProcessedOp(ctx, op.OpID)
 	if err != nil {
-		return protocol.OpOutcome{}, fmt.Errorf("read processed op: %w", err)
+		return boardcontent.OpOutcome{}, fmt.Errorf("read processed op: %w", err)
 	}
 	if found {
 		return replay(ctx, btx, prev, userID)
@@ -93,13 +93,13 @@ func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op proto
 		return rejected(ctx, btx, op.OpID, userID, rej)
 	}
 	if err != nil {
-		return protocol.OpOutcome{}, err
+		return boardcontent.OpOutcome{}, err
 	}
 	primary := res.primary
-	return protocol.OpOutcome{Event: &primary, Extra: res.extra}, nil
+	return boardcontent.OpOutcome{Event: &primary, Extra: res.extra}, nil
 }
 
-func execute(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.Op) (result, error) {
+func execute(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op boardcontent.Op) (result, error) {
 	var res result
 	err := btx.Savepoint(ctx, func(ctx context.Context, sp boardtx.Tx) error {
 		a := &applier{btx: sp, actor: userID, opID: op.OpID}
@@ -122,17 +122,17 @@ func execute(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op protocol.
 	return res, err
 }
 
-func rejected(ctx context.Context, btx boardtx.Tx, opID, userID uuid.UUID, rej *rejection) (protocol.OpOutcome, error) {
+func rejected(ctx context.Context, btx boardtx.Tx, opID, userID uuid.UUID, rej *rejection) (boardcontent.OpOutcome, error) {
 	if rej.transient {
 		return transientNack(btx, rej), nil
 	}
-	nack := protocol.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}
+	nack := boardcontent.Nack{Reason: rej.reason, AtSeq: btx.Board().Seq, Message: rej.message}
 	saved, err := saveOutcome(ctx, btx, opID, userID, nackOutcome(nack))
 	if err != nil {
-		return protocol.OpOutcome{}, err
+		return boardcontent.OpOutcome{}, err
 	}
 	if !saved {
 		return transientNack(btx, opIDTaken()), nil
 	}
-	return protocol.OpOutcome{Nack: &nack}, nil
+	return boardcontent.OpOutcome{Nack: &nack}, nil
 }

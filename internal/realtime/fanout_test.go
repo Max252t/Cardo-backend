@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
@@ -36,10 +37,10 @@ func (m multiBoard) BoardMember(ctx context.Context, boardID, userID uuid.UUID) 
 	return b.BoardMember(ctx, boardID, userID)
 }
 
-func (m multiBoard) Apply(ctx context.Context, userID, boardID uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
+func (m multiBoard) Apply(ctx context.Context, userID, boardID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {
 	b, err := m.find(boardID)
 	if err != nil {
-		return protocol.OpOutcome{}, err
+		return boardcontent.OpOutcome{}, err
 	}
 	return b.Apply(ctx, userID, boardID, op)
 }
@@ -88,7 +89,7 @@ func TestFanOutDeliversEachEventOnceToEveryClientIncludingTheInitiator(t *testin
 
 	var ids []uuid.UUID
 	for range 3 {
-		ids = append(ids, sendOp(annConn, protocol.OpCardCreate))
+		ids = append(ids, sendOp(annConn, boardcontent.OpCardCreate))
 	}
 	for name, c := range map[string]*rttest.Conn{"initiator": annConn, "remote a": bobConn, "remote b": catConn} {
 		seqs := readEventSeqs(t, c, "card.create", 3)
@@ -109,7 +110,7 @@ func TestInitiatorReceivesItsOwnEventWithTheOpID(t *testing.T) {
 	other := b.Dial(t, ann)
 	other.HandshakeSnapshot()
 
-	opID := sendOp(annConn, protocol.OpCardCreate)
+	opID := sendOp(annConn, boardcontent.OpCardCreate)
 	for _, c := range []*rttest.Conn{annConn, other} {
 		ev := awaitOwnEvent(c, opID)
 		assert.Equal(t, int64(1), ev.Seq)
@@ -143,7 +144,7 @@ func TestChannelsAreSubscribedOnFirstJoinAndReleasedOnLastLeavePerInstance(t *te
 	waitSubscribed(t, a, board, false)
 	waitSubscribed(t, b, board, true)
 
-	opID := sendOp(bobConn, protocol.OpCardCreate)
+	opID := sendOp(bobConn, boardcontent.OpCardCreate)
 	assert.Equal(t, int64(1), awaitOwnEvent(bobConn, opID).Seq)
 
 	again := a.Dial(t, ann)
@@ -184,23 +185,23 @@ func TestBoardsAreIsolatedFromEachOther(t *testing.T) {
 	waitSubscribed(t, a, env.Board.ID, true)
 	waitSubscribed(t, a, second.ID, true)
 
-	_, err := second.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, ann)
+	_, err := second.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, ann)
 	require.NoError(t, err)
-	_, err = env.Board.Append(context.Background(), protocol.EventCardArchived, map[string]string{}, ann)
+	_, err = env.Board.Append(context.Background(), boardcontent.EventCardArchived, map[string]string{}, ann)
 	require.NoError(t, err)
-	assert.Equal(t, protocol.EventCardCreated, other.MustNext().Type)
-	assert.Equal(t, protocol.EventCardArchived, first.MustNext().Type)
+	assert.Equal(t, boardcontent.EventCardCreated, other.MustNext().Type)
+	assert.Equal(t, boardcontent.EventCardArchived, first.MustNext().Type)
 
 	appendOn := func(b *rttest.Board, n int) {
 		for range n {
-			_, err := b.Append(context.Background(), protocol.EventCardMoved, map[string]string{}, ann)
+			_, err := b.Append(context.Background(), boardcontent.EventCardMoved, map[string]string{}, ann)
 			require.NoError(t, err)
 		}
 	}
 	appendOn(env.Board, 2)
 	appendOn(second, 1)
-	assert.Equal(t, []int64{2, 3}, readEventSeqs(t, first, protocol.EventCardMoved, 3))
-	assert.Equal(t, []int64{2}, readEventSeqs(t, other, protocol.EventCardMoved, 2))
+	assert.Equal(t, []int64{2, 3}, readEventSeqs(t, first, boardcontent.EventCardMoved, 3))
+	assert.Equal(t, []int64{2}, readEventSeqs(t, other, boardcontent.EventCardMoved, 2))
 
 	require.NoError(t, other.Close())
 	waitConnections(t, a, second.ID, 0)
@@ -227,7 +228,7 @@ func TestBoardDeletionClosesOnlyThatBoardsConnections(t *testing.T) {
 	waitConnections(t, a, second.ID, 0)
 	assert.Equal(t, 1, a.Hub.ConnectionCount(env.Board.ID))
 
-	opID := sendOp(first, protocol.OpCardCreate)
+	opID := sendOp(first, boardcontent.OpCardCreate)
 	assert.Equal(t, int64(1), awaitOwnEvent(first, opID).Seq)
 }
 
@@ -313,11 +314,11 @@ func TestInitiatorRecoversALostConfirmationByResendingTheOp(t *testing.T) {
 
 	env.Network.SetDropFilter(dropSeq("board", 1))
 	opID := uuid.New()
-	c.SendJSON(protocol.OpCardCreate, &opID, map[string]any{"card_id": uuid.NewString()})
+	c.SendJSON(boardcontent.OpCardCreate, &opID, map[string]any{"card_id": uuid.NewString()})
 	require.Eventually(t, func() bool { return env.Board.ApplyCount() == 1 }, eventually, 5*time.Millisecond)
 	env.Network.SetDropFilter(nil)
 
-	c.SendJSON(protocol.OpCardCreate, &opID, map[string]any{"card_id": uuid.NewString()})
+	c.SendJSON(boardcontent.OpCardCreate, &opID, map[string]any{"card_id": uuid.NewString()})
 	ev := awaitOwnEvent(c, opID)
 	assert.Equal(t, int64(1), ev.Seq)
 	assert.Equal(t, 2, env.Board.ApplyCount())
@@ -352,7 +353,7 @@ func TestDroppedPresenceMessageIsHealedByThePresenceList(t *testing.T) {
 	assert.Equal(t, []string{"Ann", "Bob"}, names)
 	late.Expect(protocol.TypeSyncReady)
 
-	opID := sendOp(bobConn, protocol.OpCardCreate)
+	opID := sendOp(bobConn, boardcontent.OpCardCreate)
 	for {
 		msg := annConn.MustNext()
 		require.NotEqual(t, protocol.TypePresenceJoin, msg.Type, "the dropped join is never delivered later")

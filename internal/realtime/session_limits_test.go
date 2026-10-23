@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
@@ -39,7 +40,7 @@ func TestValidTrafficDoesNotForgiveEarlierViolations(t *testing.T) {
 
 	c.SendRaw([]byte(`{"v":9,"type":"hello"}`))
 	assert.Equal(t, protocol.CodeProtocolError, errorCode(t, c.MustNext()))
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 	c.SendRaw([]byte(`{"v":1,"type":"hello","payload":{"last_seq":-5}}`))
 	assert.Equal(t, protocol.CodeProtocolError, errorCode(t, c.MustNext()))
@@ -56,7 +57,7 @@ func TestConfiguredViolationLimitIsHonoured(t *testing.T) {
 		c.SendRaw([]byte(`{}`))
 		assert.Equal(t, protocol.CodeProtocolError, errorCode(t, c.MustNext()))
 	}
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 	c.SendRaw([]byte(`{}`))
 	assert.Equal(t, protocol.CodeProtocolError, errorCode(t, c.MustNext()))
@@ -195,17 +196,17 @@ func TestRateLimitedOperationsAreNackedWithoutReachingTheProcessor(t *testing.T)
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
 
-	first := sendOp(c, protocol.OpCardCreate)
+	first := sendOp(c, boardcontent.OpCardCreate)
 	ev := c.Expect("card.create")
 	require.NotNil(t, ev.OpID)
 	assert.Equal(t, first, *ev.OpID)
 
-	second := sendOp(c, protocol.OpCardCreate)
+	second := sendOp(c, boardcontent.OpCardCreate)
 	nack := c.MustNext()
-	assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, nack))
+	assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, nack))
 	require.NotNil(t, nack.OpID)
 	assert.Equal(t, second, *nack.OpID)
-	body := decodeAs[protocol.Nack](t, nack)
+	body := decodeAs[boardcontent.Nack](t, nack)
 	assert.Equal(t, int64(1), body.AtSeq)
 	assert.NotEmpty(t, body.Message)
 	assert.Equal(t, 1, env.Board.ApplyCount())
@@ -219,25 +220,25 @@ func TestRateLimiterRefillsWithTheClock(t *testing.T) {
 	c.HandshakeSnapshot()
 
 	for range 2 {
-		sendOp(c, protocol.OpCardCreate)
+		sendOp(c, boardcontent.OpCardCreate)
 		c.Expect("card.create")
 	}
-	sendOp(c, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()))
+	sendOp(c, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()))
 
 	env.Clock.Advance(500 * time.Millisecond)
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
-	sendOp(c, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()))
+	sendOp(c, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()))
 
 	env.Clock.Advance(10 * time.Second)
 	for range 2 {
-		sendOp(c, protocol.OpCardCreate)
+		sendOp(c, boardcontent.OpCardCreate)
 		c.Expect("card.create")
 	}
-	sendOp(c, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()), "the bucket never holds more than the burst")
+	sendOp(c, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()), "the bucket never holds more than the burst")
 	assert.Equal(t, 5, env.Board.ApplyCount())
 }
 
@@ -248,12 +249,12 @@ func TestSustainedRateLimitAbuseClosesWith4008(t *testing.T) {
 	})
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 
 	for range 5 {
-		sendOp(c, protocol.OpCardCreate)
-		assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()))
+		sendOp(c, boardcontent.OpCardCreate)
+		assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()))
 	}
 	assert.Equal(t, protocol.CloseRateLimited, c.ExpectClose().Code)
 	waitConnections(t, inst, env.Board.ID, 0)
@@ -267,22 +268,22 @@ func TestRateLimitStrikesExpireWithTheAbuseWindow(t *testing.T) {
 	})
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 
 	for range 2 {
-		sendOp(c, protocol.OpCardCreate)
-		assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()))
+		sendOp(c, boardcontent.OpCardCreate)
+		assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()))
 	}
 	env.Clock.Advance(11 * time.Second)
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 	for range 2 {
-		sendOp(c, protocol.OpCardCreate)
-		assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()), "strikes of the previous window are forgotten")
+		sendOp(c, boardcontent.OpCardCreate)
+		assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()), "strikes of the previous window are forgotten")
 	}
-	sendOp(c, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()))
+	sendOp(c, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()))
 	assert.Equal(t, protocol.CloseRateLimited, c.ExpectClose().Code)
 }
 
@@ -294,11 +295,11 @@ func TestRateLimitIsPerConnection(t *testing.T) {
 	laptop := inst.Dial(t, ann)
 	laptop.HandshakeSnapshot()
 
-	awaitOwnEvent(phone, sendOp(phone, protocol.OpCardCreate))
-	sendOp(phone, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, drainNack(phone)))
+	awaitOwnEvent(phone, sendOp(phone, boardcontent.OpCardCreate))
+	sendOp(phone, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, drainNack(phone)))
 
-	awaitOwnEvent(laptop, sendOp(laptop, protocol.OpCardCreate))
+	awaitOwnEvent(laptop, sendOp(laptop, boardcontent.OpCardCreate))
 	assert.Equal(t, 2, env.Board.ApplyCount())
 }
 
@@ -315,10 +316,10 @@ func TestForbiddenOperationsStillConsumeRateLimitTokens(t *testing.T) {
 	c := inst.Dial(t, viewer)
 	c.HandshakeSnapshot()
 
-	sendOp(c, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonForbidden, nackReason(t, c.MustNext()))
-	sendOp(c, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonRateLimited, nackReason(t, c.MustNext()))
+	sendOp(c, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonForbidden, nackReason(t, c.MustNext()))
+	sendOp(c, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonRateLimited, nackReason(t, c.MustNext()))
 	assert.Zero(t, env.Board.ApplyCount())
 }
 

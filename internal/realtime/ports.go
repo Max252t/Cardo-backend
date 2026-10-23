@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -40,7 +41,7 @@ type Presence interface {
 }
 
 type OpApplier interface {
-	Apply(ctx context.Context, userID, boardID uuid.UUID, op protocol.Op) (protocol.OpOutcome, error)
+	Apply(ctx context.Context, userID, boardID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error)
 }
 
 type SyncSource interface {

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
@@ -53,7 +54,7 @@ func TestBoardEvents(t *testing.T) {
 	e.boards.events = func(_ context.Context, userID, boardID uuid.UUID, afterSeq int64) (domain.EventPage, error) {
 		assert.Equal(t, int64(5), afterSeq)
 		return domain.EventPage{
-			Events: []domain.Event{{Seq: 6, Type: protocol.EventCardMoved, OpID: &opID, Payload: json.RawMessage(`{"card_id":"x"}`), CreatedAt: time.UnixMilli(1710000000000)}},
+			Events: []domain.Event{{Seq: 6, Type: boardcontent.EventCardMoved, OpID: &opID, Payload: json.RawMessage(`{"card_id":"x"}`), CreatedAt: time.UnixMilli(1710000000000)}},
 			Seq:    6,
 		}, nil
 	}

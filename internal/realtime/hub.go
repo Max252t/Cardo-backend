@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -94,7 +95,7 @@ func NewHub(deps Deps, cfg Config, opts ...HubOption) (*Hub, error) {
 		cancelBase: cancel,
 		rooms:      make(map[uuid.UUID]*room),
 	}
-	h.hooks[protocol.EventBoardDeleted] = []EventHook{closeBoardOnDelete}
+	h.hooks[boardcontent.EventBoardDeleted] = []EventHook{closeBoardOnDelete}
 	for _, opt := range opts {
 		opt(h)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/pubsub"
@@ -80,8 +81,8 @@ func TestEventPublisherSendsEnvelopesToBoardChannel(t *testing.T) {
 
 	opID := uuid.New()
 	events := []domain.Event{
-		{BoardID: boardID, Seq: 7, Type: protocol.EventColumnRebalanced, Payload: json.RawMessage(`{"a":1}`), CreatedAt: time.UnixMilli(1000)},
-		{BoardID: boardID, Seq: 8, Type: protocol.EventCardMoved, OpID: &opID, Payload: json.RawMessage(`{"b":2}`), CreatedAt: time.UnixMilli(2000)},
+		{BoardID: boardID, Seq: 7, Type: boardcontent.EventColumnRebalanced, Payload: json.RawMessage(`{"a":1}`), CreatedAt: time.UnixMilli(1000)},
+		{BoardID: boardID, Seq: 8, Type: boardcontent.EventCardMoved, OpID: &opID, Payload: json.RawMessage(`{"b":2}`), CreatedAt: time.UnixMilli(2000)},
 	}
 	require.NoError(t, pubsub.NewEventPublisher(sender).Publish(ctx, events))
 	for _, want := range events {

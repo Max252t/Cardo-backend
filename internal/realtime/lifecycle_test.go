@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
@@ -53,7 +54,7 @@ func TestSlowClientIsDroppedWithoutStallingFastClientsOrTheHub(t *testing.T) {
 	payload := map[string]string{"blob": strings.Repeat("x", 256<<10)}
 	var last int64
 	for i := 0; i < 400 && inst.Hub.ConnectionCount(env.Board.ID) == 2; i++ {
-		ev, err := env.Board.Append(context.Background(), protocol.EventCardCreated, payload, ann)
+		ev, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, payload, ann)
 		require.NoError(t, err)
 		last = ev.Seq
 		select {
@@ -72,7 +73,7 @@ func TestSlowClientIsDroppedWithoutStallingFastClientsOrTheHub(t *testing.T) {
 	go func() {
 		defer close(done)
 		_ = inst.Hub.ConnectionCount(env.Board.ID)
-		ev, err := env.Board.Append(context.Background(), protocol.EventCardArchived, map[string]string{}, ann)
+		ev, err := env.Board.Append(context.Background(), boardcontent.EventCardArchived, map[string]string{}, ann)
 		assert.NoError(t, err)
 		assert.Equal(t, last+1, ev.Seq)
 	}()
@@ -101,14 +102,14 @@ func TestOverflowingOneBoardDoesNotAffectAnother(t *testing.T) {
 
 	payload := map[string]string{"blob": strings.Repeat("x", 256<<10)}
 	for i := 0; i < 400 && inst.Hub.ConnectionCount(env.Board.ID) == 1; i++ {
-		_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, payload, ann)
+		_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, payload, ann)
 		require.NoError(t, err)
 	}
 	waitConnections(t, inst, env.Board.ID, 0)
 
-	_, err := second.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, ann)
+	_, err := second.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, ann)
 	require.NoError(t, err)
-	assert.Equal(t, []int64{1}, readEventSeqs(t, healthy, protocol.EventCardCreated, 1))
+	assert.Equal(t, []int64{1}, readEventSeqs(t, healthy, boardcontent.EventCardCreated, 1))
 	assert.Equal(t, 1, inst.Hub.ConnectionCount(second.ID))
 }
 
@@ -137,7 +138,7 @@ func TestAuthRefreshExtendsTheConnectionLifetimeRepeatedly(t *testing.T) {
 		assert.Equal(t, env.Clock.Now().Add(15*time.Minute).Truncate(time.Second).UnixMilli(), refreshed.ExpiresAt)
 		waitTimers(t, env, 2)
 	}
-	opID := sendOp(c, protocol.OpCardCreate)
+	opID := sendOp(c, boardcontent.OpCardCreate)
 	assert.Equal(t, int64(1), awaitOwnEvent(c, opID).Seq)
 
 	env.Clock.Advance(16 * time.Minute)
@@ -155,7 +156,7 @@ func TestConnectionIsKeptUntilTheLastMomentBeforeExpiry(t *testing.T) {
 	waitTimers(t, env, 2)
 
 	env.Clock.Advance(15*time.Minute - time.Second)
-	opID := sendOp(c, protocol.OpCardCreate)
+	opID := sendOp(c, boardcontent.OpCardCreate)
 	awaitOwnEvent(c, opID)
 	assert.Equal(t, 1, inst.Hub.ConnectionCount(env.Board.ID))
 
@@ -231,7 +232,7 @@ func TestAuthRefreshWithValidTokenAfterRejectionStillWorks(t *testing.T) {
 	c.Expect(protocol.TypeAuthRefreshed)
 	waitTimers(t, env, 2)
 	env.Clock.Advance(10 * time.Minute)
-	opID := sendOp(c, protocol.OpCardCreate)
+	opID := sendOp(c, boardcontent.OpCardCreate)
 	awaitOwnEvent(c, opID)
 }
 
@@ -254,7 +255,7 @@ func TestAuthRefreshAppliesToEveryDeviceOnlyForTheConnectionThatSentIt(t *testin
 	env.Clock.Advance(6 * time.Minute)
 	assert.Equal(t, protocol.CloseInvalidToken, stale.ExpectClose().Code)
 	waitConnections(t, inst, env.Board.ID, 1)
-	opID := sendOp(refreshed, protocol.OpCardCreate)
+	opID := sendOp(refreshed, boardcontent.OpCardCreate)
 	awaitOwnEvent(refreshed, opID)
 }
 
@@ -264,7 +265,7 @@ func TestApplyReportingBoardNotFoundClosesWith4004(t *testing.T) {
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
 	env.Board.FailNextApply(domain.ErrNotFound)
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	assert.Equal(t, protocol.CloseBoardDeleted, c.ExpectClose().Code)
 	waitConnections(t, inst, env.Board.ID, 0)
 }
@@ -275,11 +276,11 @@ func TestApplyReportingForbiddenIsANack(t *testing.T) {
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
 	env.Board.FailNextApply(domain.ErrForbidden)
-	opID := sendOp(c, protocol.OpCardCreate)
+	opID := sendOp(c, boardcontent.OpCardCreate)
 	nack := c.MustNext()
-	assert.Equal(t, protocol.ReasonForbidden, nackReason(t, nack))
+	assert.Equal(t, boardcontent.ReasonForbidden, nackReason(t, nack))
 	assert.Equal(t, opID, *nack.OpID)
-	next := sendOp(c, protocol.OpCardCreate)
+	next := sendOp(c, boardcontent.OpCardCreate)
 	assert.Equal(t, int64(1), awaitOwnEvent(c, next).Seq)
 }
 
@@ -289,10 +290,10 @@ func TestApplyValidationErrorBecomesValidationNack(t *testing.T) {
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
 	env.Board.FailNextApply(domain.NewValidationError("title", "is required"))
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	nack := c.MustNext()
-	assert.Equal(t, protocol.ReasonValidation, nackReason(t, nack))
-	assert.Contains(t, decodeAs[protocol.Nack](t, nack).Message, "title")
+	assert.Equal(t, boardcontent.ReasonValidation, nackReason(t, nack))
+	assert.Contains(t, decodeAs[boardcontent.Nack](t, nack).Message, "title")
 }
 
 func TestInternalNackNeverLeaksTheUnderlyingError(t *testing.T) {
@@ -301,9 +302,9 @@ func TestInternalNackNeverLeaksTheUnderlyingError(t *testing.T) {
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
 	env.Board.FailNextApply(errors.New("pq: password authentication failed for user cardo"))
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	nack := c.MustNext()
-	assert.Equal(t, protocol.ReasonInternal, nackReason(t, nack))
+	assert.Equal(t, boardcontent.ReasonInternal, nackReason(t, nack))
 	assert.NotContains(t, string(nack.Payload), "pq:")
 }
 
@@ -325,7 +326,7 @@ func TestBoardDeletedClosesEveryConnectionOnEveryInstance(t *testing.T) {
 	ev, err := env.Board.Delete(context.Background(), owner)
 	require.NoError(t, err)
 	for i, c := range conns {
-		deleted := drainUntil(c, protocol.EventBoardDeleted)
+		deleted := drainUntil(c, boardcontent.EventBoardDeleted)
 		assert.Equal(t, ev.Seq, deleted.Seq, i)
 		assert.Equal(t, protocol.CloseBoardDeleted, c.ExpectClose().Code, i)
 	}
@@ -378,17 +379,17 @@ func TestCloseBoardCloseUserAndSetRole(t *testing.T) {
 	bobConn.HandshakeSnapshot()
 	waitConnections(t, inst, env.Board.ID, 3)
 
-	sendOp(annPhone, protocol.OpCardCreate)
-	assert.Equal(t, protocol.ReasonForbidden, nackReason(t, drainNack(annPhone)))
+	sendOp(annPhone, boardcontent.OpCardCreate)
+	assert.Equal(t, boardcontent.ReasonForbidden, nackReason(t, drainNack(annPhone)))
 	env.Board.AddMember(ann, "Ann", domain.RoleEditor)
 	inst.Hub.SetRole(env.Board.ID, ann, domain.RoleEditor)
 	for _, c := range []*rttest.Conn{annPhone, annLaptop} {
-		opID := sendOp(c, protocol.OpCardCreate)
+		opID := sendOp(c, boardcontent.OpCardCreate)
 		assert.NotNil(t, awaitOwnEvent(c, opID).OpID)
 	}
 	inst.Hub.SetRole(env.Board.ID, uuid.New(), domain.RoleViewer)
 	inst.Hub.SetRole(uuid.New(), bob, domain.RoleViewer)
-	opID := sendOp(bobConn, protocol.OpCardCreate)
+	opID := sendOp(bobConn, boardcontent.OpCardCreate)
 	awaitOwnEvent(bobConn, opID)
 
 	inst.Hub.CloseUser(env.Board.ID, ann, protocol.CloseAccessRevoked, "removed from the board")
@@ -429,13 +430,13 @@ func TestCustomEventHooksRunForMatchingEventsOnly(t *testing.T) {
 	var hits []hit
 	hits1 := make(chan struct{}, 8)
 	inst := env.StartInstanceWith(t, "a", nil,
-		realtime.WithEventHook(protocol.EventBoardRenamed, func(h *realtime.Hub, boardID uuid.UUID, ev protocol.Envelope) {
+		realtime.WithEventHook(boardcontent.EventBoardRenamed, func(h *realtime.Hub, boardID uuid.UUID, ev protocol.Envelope) {
 			mu.Lock()
 			hits = append(hits, hit{boardID, ev.Seq})
 			mu.Unlock()
 			hits1 <- struct{}{}
 		}),
-		realtime.WithEventHook(protocol.EventBoardRenamed, func(h *realtime.Hub, boardID uuid.UUID, ev protocol.Envelope) {
+		realtime.WithEventHook(boardcontent.EventBoardRenamed, func(h *realtime.Hub, boardID uuid.UUID, ev protocol.Envelope) {
 			hits1 <- struct{}{}
 		}),
 	)
@@ -443,7 +444,7 @@ func TestCustomEventHooksRunForMatchingEventsOnly(t *testing.T) {
 	c.HandshakeSnapshot()
 
 	appendEvents(t, env, ann, 1)
-	_, err := env.Board.Append(context.Background(), protocol.EventBoardRenamed, protocol.BoardRenamed{Title: "New", ActorID: ann}, ann)
+	_, err := env.Board.Append(context.Background(), boardcontent.EventBoardRenamed, boardcontent.BoardRenamed{Title: "New", ActorID: ann}, ann)
 	require.NoError(t, err)
 	<-hits1
 	<-hits1
@@ -459,7 +460,7 @@ func TestDefaultBoardDeletedHookStillRunsAlongsideCustomHooks(t *testing.T) {
 	ann := rttest.AddUser(env, "Ann", domain.RoleOwner)
 	called := make(chan struct{}, 1)
 	inst := env.StartInstanceWith(t, "a", nil,
-		realtime.WithEventHook(protocol.EventBoardDeleted, func(*realtime.Hub, uuid.UUID, protocol.Envelope) { called <- struct{}{} }),
+		realtime.WithEventHook(boardcontent.EventBoardDeleted, func(*realtime.Hub, uuid.UUID, protocol.Envelope) { called <- struct{}{} }),
 	)
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()

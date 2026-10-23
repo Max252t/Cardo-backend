@@ -9,8 +9,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 const eventsPageLimit = 1000
@@ -119,7 +119,7 @@ func (b *Board) Append(ctx context.Context, eventType string, payload any, actor
 }
 
 func (b *Board) Delete(ctx context.Context, actor uuid.UUID) (domain.Event, error) {
-	data, err := json.Marshal(protocol.BoardDeleted{ActorID: actor})
+	data, err := json.Marshal(boardcontent.BoardDeleted{ActorID: actor})
 	if err != nil {
 		return domain.Event{}, err
 	}
@@ -147,33 +147,33 @@ func (b *Board) BoardMember(_ context.Context, boardID, userID uuid.UUID) (domai
 	return m, nil
 }
 
-func (b *Board) Apply(ctx context.Context, userID, _ uuid.UUID, op protocol.Op) (protocol.OpOutcome, error) {
+func (b *Board) Apply(ctx context.Context, userID, _ uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {
 	b.mu.Lock()
 	b.applyCount++
 	if err := b.failNext; err != nil {
 		b.failNext = nil
 		b.mu.Unlock()
-		return protocol.OpOutcome{}, err
+		return boardcontent.OpOutcome{}, err
 	}
 	m, member := b.members[userID]
 	switch {
 	case b.deleted || !member:
 		b.mu.Unlock()
-		return protocol.OpOutcome{}, domain.ErrNotFound
+		return boardcontent.OpOutcome{}, domain.ErrNotFound
 	case !m.Role.AtLeast(domain.RoleEditor):
-		nack := protocol.Nack{Reason: protocol.ReasonForbidden, AtSeq: b.seq, Message: "forbidden"}
+		nack := boardcontent.Nack{Reason: boardcontent.ReasonForbidden, AtSeq: b.seq, Message: "forbidden"}
 		b.mu.Unlock()
-		return protocol.OpOutcome{Nack: &nack}, nil
+		return boardcontent.OpOutcome{Nack: &nack}, nil
 	}
 	if prev, done := b.processed[op.OpID]; done {
 		b.mu.Unlock()
-		return protocol.OpOutcome{Event: &prev, Replayed: true}, nil
+		return boardcontent.OpOutcome{Event: &prev, Replayed: true}, nil
 	}
 	opID := op.OpID
 	ev := b.appendLocked(strings.TrimPrefix(op.Type, "op."), op.Payload, &opID, userID)
 	b.processed[op.OpID] = ev
 	b.mu.Unlock()
-	return protocol.OpOutcome{Event: &ev}, b.publish(ctx, ev)
+	return boardcontent.OpOutcome{Event: &ev}, b.publish(ctx, ev)
 }
 
 func (b *Board) Snapshot(_ context.Context, userID, _ uuid.UUID) (domain.BoardSnapshot, error) {

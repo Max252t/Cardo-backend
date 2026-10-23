@@ -3,8 +3,8 @@ package ops
 import (
 	"errors"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 type rejection struct {
@@ -22,27 +22,27 @@ func reject(reason, message string) error {
 }
 
 func notFound(message string) error {
-	return reject(protocol.ReasonNotFound, message)
+	return reject(boardcontent.ReasonNotFound, message)
 }
 
 func conflict(message string) error {
-	return reject(protocol.ReasonVersionConflict, message)
+	return reject(boardcontent.ReasonVersionConflict, message)
 }
 
 func invalid(message string) error {
-	return reject(protocol.ReasonValidation, message)
+	return reject(boardcontent.ReasonValidation, message)
 }
 
 func forbidden(message string) error {
-	return reject(protocol.ReasonForbidden, message)
+	return reject(boardcontent.ReasonForbidden, message)
 }
 
 func notMember() error {
-	return &rejection{reason: protocol.ReasonForbidden, message: "not a member of this board", transient: true}
+	return &rejection{reason: boardcontent.ReasonForbidden, message: "not a member of this board", transient: true}
 }
 
 func opIDTaken() *rejection {
-	return &rejection{reason: protocol.ReasonValidation, message: "op_id was already used by another operation", transient: true}
+	return &rejection{reason: boardcontent.ReasonValidation, message: "op_id was already used by another operation", transient: true}
 }
 
 func idUnavailable(field string) error {
@@ -57,7 +57,7 @@ func asRejection(err error) error {
 	if errors.Is(err, domain.ErrDuplicateID) {
 		return invalid("id: is not available")
 	}
-	if errors.Is(err, protocol.ErrUnknownType) {
+	if errors.Is(err, boardcontent.ErrUnknownType) {
 		return invalid("unknown operation type")
 	}
 	return err

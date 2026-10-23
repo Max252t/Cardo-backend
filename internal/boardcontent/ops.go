@@ -1,4 +1,4 @@
-package protocol
+package boardcontent
 
 import (
 	"bytes"

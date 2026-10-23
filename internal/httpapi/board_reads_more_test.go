@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 func TestSnapshotErrorMapping(t *testing.T) {
@@ -186,8 +186,8 @@ func TestBoardEventsResponseShape(t *testing.T) {
 			Seq:     20,
 			HasMore: true,
 			Events: []domain.Event{
-				{Seq: 18, Type: protocol.EventCardMoved, OpID: &opID, Payload: json.RawMessage(`{"card_id":"c"}`), CreatedAt: time.UnixMilli(1710000000123)},
-				{Seq: 19, Type: protocol.EventColumnRebalanced, Payload: json.RawMessage(`{"column_id":"x","cards":[]}`), CreatedAt: time.UnixMilli(1710000000456)},
+				{Seq: 18, Type: boardcontent.EventCardMoved, OpID: &opID, Payload: json.RawMessage(`{"card_id":"c"}`), CreatedAt: time.UnixMilli(1710000000123)},
+				{Seq: 19, Type: boardcontent.EventColumnRebalanced, Payload: json.RawMessage(`{"column_id":"x","cards":[]}`), CreatedAt: time.UnixMilli(1710000000456)},
 			},
 		}, nil
 	}

@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/rank"
 )
 
@@ -28,8 +28,8 @@ func TestFiftyConcurrentMovesOfOneCardYieldExactlyOneWinner(t *testing.T) {
 	require.Equal(t, int64(1), cardBefore.Version)
 
 	const workers = 50
-	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardMove, uuid.New(), protocol.CardMove{
+	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardMove, uuid.New(), boardcontent.CardMove{
 			CardID: card, ToColumnID: cols[i%len(cols)], BaseVersion: ptr(int64(1)),
 		})
 	})
@@ -42,7 +42,7 @@ func TestFiftyConcurrentMovesOfOneCardYieldExactlyOneWinner(t *testing.T) {
 			require.Nil(t, r.out.Nack)
 			winners = append(winners, *r.out.Event)
 		case r.out.Nack != nil:
-			assert.Equal(t, protocol.ReasonVersionConflict, r.out.Nack.Reason)
+			assert.Equal(t, boardcontent.ReasonVersionConflict, r.out.Nack.Reason)
 			assert.GreaterOrEqual(t, r.out.Nack.AtSeq, seqBefore+1, "a loser's nack is evaluated after the winner committed")
 			assert.False(t, r.out.Replayed)
 			conflicts++
@@ -54,10 +54,10 @@ func TestFiftyConcurrentMovesOfOneCardYieldExactlyOneWinner(t *testing.T) {
 	assert.Equal(t, workers-1, conflicts)
 
 	win := winners[0]
-	assert.Equal(t, protocol.EventCardMoved, win.Type)
+	assert.Equal(t, boardcontent.EventCardMoved, win.Type)
 	assert.Equal(t, seqBefore+1, win.Seq)
 
-	moved := decode[protocol.CardMoved](t, win)
+	moved := decode[boardcontent.CardMoved](t, win)
 	final := f.cardRow(t, card)
 	assert.Equal(t, int64(2), final.Version, "version is bumped exactly once")
 	assert.Equal(t, moved.ToColumnID, final.ColumnID)
@@ -80,12 +80,12 @@ func TestConcurrentColumnMovesWithOneBaseVersion(t *testing.T) {
 	other := f.column(t, "other", nil)
 
 	const workers = 20
-	results := f.applyConcurrently(t, workers, func(int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpColumnMove, uuid.New(), protocol.ColumnMove{
+	results := f.applyConcurrently(t, workers, func(int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpColumnMove, uuid.New(), boardcontent.ColumnMove{
 			ColumnID: target, AfterID: &other, BaseVersion: ptr(int64(1)),
 		})
 	})
-	wins, conflicts := countOutcomes(t, results, protocol.ReasonVersionConflict)
+	wins, conflicts := countOutcomes(t, results, boardcontent.ReasonVersionConflict)
 	assert.Equal(t, 1, wins)
 	assert.Equal(t, workers-1, conflicts)
 	assert.Equal(t, int64(2), f.columnRow(t, target).Version)
@@ -149,8 +149,8 @@ func TestParallelCardInsertsAtOneAnchorAllSucceedInSerializedOrder(t *testing.T)
 	for i := range ids {
 		ids[i] = uuid.New()
 	}
-	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardCreate, uuid.New(), protocol.CardCreate{
+	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardCreate, uuid.New(), boardcontent.CardCreate{
 			CardID: ids[i], ColumnID: col, Title: fmt.Sprintf("n%d", i), AfterID: &first, BeforeID: &last,
 		})
 	})
@@ -185,8 +185,8 @@ func TestParallelCardInsertsAtTheEndKeepCommitOrder(t *testing.T) {
 	for i := range ids {
 		ids[i] = uuid.New()
 	}
-	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardCreate, uuid.New(), protocol.CardCreate{
+	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardCreate, uuid.New(), boardcontent.CardCreate{
 			CardID: ids[i], ColumnID: col, Title: fmt.Sprintf("n%d", i),
 		})
 	})
@@ -211,8 +211,8 @@ func TestParallelInsertsAtTheFrontKeepReverseCommitOrder(t *testing.T) {
 	for i := range ids {
 		ids[i] = uuid.New()
 	}
-	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardCreate, uuid.New(), protocol.CardCreate{
+	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardCreate, uuid.New(), boardcontent.CardCreate{
 			CardID: ids[i], ColumnID: col, Title: fmt.Sprintf("n%d", i), BeforeID: &anchor,
 		})
 	})
@@ -240,8 +240,8 @@ func TestParallelColumnInsertsAtOneAnchor(t *testing.T) {
 	for i := range ids {
 		ids[i] = uuid.New()
 	}
-	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpColumnCreate, uuid.New(), protocol.ColumnCreate{
+	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpColumnCreate, uuid.New(), boardcontent.ColumnCreate{
 			ColumnID: ids[i], Title: fmt.Sprintf("c%d", i), AfterID: &first, BeforeID: &last,
 		})
 	})
@@ -272,8 +272,8 @@ func TestConcurrentMovesOfDifferentCardsIntoOneSlot(t *testing.T) {
 	for i := range cards {
 		cards[i] = f.card(t, src, fmt.Sprintf("c%d", i))
 	}
-	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, protocol.Op) {
-		return f.owner.ID, mustOp(t, protocol.OpCardMove, uuid.New(), protocol.CardMove{
+	results := f.applyConcurrently(t, workers, func(i int) (uuid.UUID, boardcontent.Op) {
+		return f.owner.ID, mustOp(t, boardcontent.OpCardMove, uuid.New(), boardcontent.CardMove{
 			CardID: cards[i], ToColumnID: dst, AfterID: &anchor, BaseVersion: ptr(int64(1)),
 		})
 	})
@@ -315,20 +315,20 @@ func TestMixedConcurrentOperationsConvergeToTheEventLog(t *testing.T) {
 				user := users[(w+i)%len(users)]
 				card := cards[(w*7+i*5)%len(cards)]
 				col := cols[(w+i*3)%len(cols)]
-				var op protocol.Op
+				var op boardcontent.Op
 				switch (w + i) % 6 {
 				case 0:
-					op = mustOp(t, protocol.OpCardCreate, uuid.New(), protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("new-%d-%d", w, i), AfterID: &card})
+					op = mustOp(t, boardcontent.OpCardCreate, uuid.New(), boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("new-%d-%d", w, i), AfterID: &card})
 				case 1:
-					op = mustOp(t, protocol.OpCardEdit, uuid.New(), protocol.CardEdit{CardID: card, Title: ptr(fmt.Sprintf("t-%d-%d", w, i))})
+					op = mustOp(t, boardcontent.OpCardEdit, uuid.New(), boardcontent.CardEdit{CardID: card, Title: ptr(fmt.Sprintf("t-%d-%d", w, i))})
 				case 2:
-					op = mustOp(t, protocol.OpCardMove, uuid.New(), protocol.CardMove{CardID: card, ToColumnID: col, BeforeID: &cards[(w+i)%len(cards)], BaseVersion: ptr(int64(1 + (w+i)%3))})
+					op = mustOp(t, boardcontent.OpCardMove, uuid.New(), boardcontent.CardMove{CardID: card, ToColumnID: col, BeforeID: &cards[(w+i)%len(cards)], BaseVersion: ptr(int64(1 + (w+i)%3))})
 				case 3:
-					op = mustOp(t, protocol.OpColumnRename, uuid.New(), protocol.ColumnRename{ColumnID: col, Title: fmt.Sprintf("r-%d-%d", w, i)})
+					op = mustOp(t, boardcontent.OpColumnRename, uuid.New(), boardcontent.ColumnRename{ColumnID: col, Title: fmt.Sprintf("r-%d-%d", w, i)})
 				case 4:
-					op = mustOp(t, protocol.OpColumnCreate, uuid.New(), protocol.ColumnCreate{ColumnID: uuid.New(), Title: fmt.Sprintf("nc-%d-%d", w, i), AfterID: &col})
+					op = mustOp(t, boardcontent.OpColumnCreate, uuid.New(), boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: fmt.Sprintf("nc-%d-%d", w, i), AfterID: &col})
 				default:
-					op = mustOp(t, protocol.OpCardEdit, uuid.New(), protocol.CardEdit{CardID: card, Description: ptr(fmt.Sprintf("d-%d-%d", w, i)), BaseDescriptionVersion: ptr(int64(1 + (w+i)%2))})
+					op = mustOp(t, boardcontent.OpCardEdit, uuid.New(), boardcontent.CardEdit{CardID: card, Description: ptr(fmt.Sprintf("d-%d-%d", w, i)), BaseDescriptionVersion: ptr(int64(1 + (w+i)%2))})
 				}
 				_, err := f.proc.Apply(t.Context(), user, f.board.ID, op)
 				errs <- err
@@ -379,33 +379,33 @@ func newModel() *model {
 func (m *model) apply(t *testing.T, ev domain.Event) {
 	t.Helper()
 	switch ev.Type {
-	case protocol.EventColumnCreated:
-		p := decode[protocol.ColumnCreated](t, ev)
+	case boardcontent.EventColumnCreated:
+		p := decode[boardcontent.ColumnCreated](t, ev)
 		m.columns[p.ID] = &modelColumn{title: p.Title, rank: p.Rank, version: p.Version}
-	case protocol.EventColumnRenamed:
-		p := decode[protocol.ColumnRenamed](t, ev)
+	case boardcontent.EventColumnRenamed:
+		p := decode[boardcontent.ColumnRenamed](t, ev)
 		c := m.columns[p.ColumnID]
 		c.title, c.version = p.Title, p.Version
-	case protocol.EventColumnMoved:
-		p := decode[protocol.ColumnMoved](t, ev)
+	case boardcontent.EventColumnMoved:
+		p := decode[boardcontent.ColumnMoved](t, ev)
 		c := m.columns[p.ColumnID]
 		c.rank, c.version = p.Rank, p.Version
-	case protocol.EventColumnArchived:
-		p := decode[protocol.ColumnArchived](t, ev)
+	case boardcontent.EventColumnArchived:
+		p := decode[boardcontent.ColumnArchived](t, ev)
 		delete(m.columns, p.ColumnID)
 		for _, id := range p.CardIDs {
 			delete(m.cards, id)
 		}
-	case protocol.EventColumnsRebalanced:
-		p := decode[protocol.ColumnsRebalanced](t, ev)
+	case boardcontent.EventColumnsRebalanced:
+		p := decode[boardcontent.ColumnsRebalanced](t, ev)
 		for _, r := range p.Columns {
 			m.columns[r.ColumnID].rank = r.Rank
 		}
-	case protocol.EventCardCreated:
-		p := decode[protocol.CardCreated](t, ev)
+	case boardcontent.EventCardCreated:
+		p := decode[boardcontent.CardCreated](t, ev)
 		m.cards[p.ID] = &modelCard{column: p.ColumnID, title: p.Title, description: p.Description, rank: p.Rank, version: p.Version, descVersion: p.DescriptionVersion}
-	case protocol.EventCardEdited:
-		p := decode[protocol.CardEdited](t, ev)
+	case boardcontent.EventCardEdited:
+		p := decode[boardcontent.CardEdited](t, ev)
 		c := m.cards[p.CardID]
 		if p.Title != nil {
 			c.title = *p.Title
@@ -414,15 +414,15 @@ func (m *model) apply(t *testing.T, ev domain.Event) {
 			c.description = *p.Description
 		}
 		c.version, c.descVersion = p.Version, p.DescriptionVersion
-	case protocol.EventCardMoved:
-		p := decode[protocol.CardMoved](t, ev)
+	case boardcontent.EventCardMoved:
+		p := decode[boardcontent.CardMoved](t, ev)
 		c := m.cards[p.CardID]
 		c.column, c.rank, c.version = p.ToColumnID, p.Rank, p.Version
-	case protocol.EventCardArchived:
-		p := decode[protocol.CardArchived](t, ev)
+	case boardcontent.EventCardArchived:
+		p := decode[boardcontent.CardArchived](t, ev)
 		delete(m.cards, p.CardID)
-	case protocol.EventColumnRebalanced:
-		p := decode[protocol.ColumnRebalanced](t, ev)
+	case boardcontent.EventColumnRebalanced:
+		p := decode[boardcontent.ColumnRebalanced](t, ev)
 		for _, r := range p.Cards {
 			m.cards[r.CardID].rank = r.Rank
 		}

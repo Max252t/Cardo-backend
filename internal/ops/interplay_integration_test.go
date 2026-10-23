@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 func TestBoardRenamesAndOperationsShareOneGapFreeSequence(t *testing.T) {
@@ -36,7 +36,7 @@ func TestBoardRenamesAndOperationsShareOneGapFreeSequence(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			op := mustOp(t, protocol.OpCardCreate, uuid.New(), protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("c%d", i)})
+			op := mustOp(t, boardcontent.OpCardCreate, uuid.New(), boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("c%d", i)})
 			out, err := f.proc.Apply(context.Background(), f.owner.ID, f.board.ID, op)
 			if err == nil && out.Nack != nil {
 				err = fmt.Errorf("unexpected nack: %+v", out.Nack)
@@ -57,7 +57,7 @@ func TestBoardRenamesAndOperationsShareOneGapFreeSequence(t *testing.T) {
 	for _, ev := range f.eventsAfter(t, 0) {
 		counts[ev.Type]++
 	}
-	assert.Equal(t, map[string]int{protocol.EventColumnCreated: 1, protocol.EventBoardRenamed: renames, protocol.EventCardCreated: creates}, counts)
+	assert.Equal(t, map[string]int{boardcontent.EventColumnCreated: 1, boardcontent.EventBoardRenamed: renames, boardcontent.EventCardCreated: creates}, counts)
 }
 
 func TestOperationsAfterBoardDeletionAreNotFound(t *testing.T) {
@@ -74,9 +74,9 @@ func TestOperationsAfterBoardDeletionAreNotFound(t *testing.T) {
 		opType  string
 		payload any
 	}{
-		{protocol.OpCardEdit, protocol.CardEdit{CardID: card, Title: ptr("x")}},
-		{protocol.OpCardArchive, protocol.CardArchive{CardID: card}},
-		{protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: uuid.New(), Title: "x"}},
+		{boardcontent.OpCardEdit, boardcontent.CardEdit{CardID: card, Title: ptr("x")}},
+		{boardcontent.OpCardArchive, boardcontent.CardArchive{CardID: card}},
+		{boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: uuid.New(), Title: "x"}},
 	} {
 		op := mustOp(t, tc.opType, uuid.New(), tc.payload)
 		_, err := f.proc.Apply(context.Background(), f.owner.ID, f.board.ID, op)
@@ -103,7 +103,7 @@ func TestConcurrentOperationsAndBoardDeletionNeverWriteAfterTheDeleteEvent(t *te
 		go func() {
 			defer wg.Done()
 			<-start
-			op := mustOp(t, protocol.OpCardCreate, uuid.New(), protocol.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("c%d", i)})
+			op := mustOp(t, boardcontent.OpCardCreate, uuid.New(), boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: fmt.Sprintf("c%d", i)})
 			out, err := f.proc.Apply(context.Background(), f.owner.ID, f.board.ID, op)
 			results[i] = err
 			nacks[i] = out.Nack != nil
@@ -132,6 +132,6 @@ func TestConcurrentOperationsAndBoardDeletionNeverWriteAfterTheDeleteEvent(t *te
 
 	events := f.eventsAfter(t, 0)
 	require.Len(t, events, 2+succeeded)
-	assert.Equal(t, protocol.EventBoardDeleted, events[len(events)-1].Type)
+	assert.Equal(t, boardcontent.EventBoardDeleted, events[len(events)-1].Type)
 	f.requireGapFreeSeq(t)
 }

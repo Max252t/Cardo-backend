@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
@@ -42,7 +43,7 @@ func TestHandshakeSnapshotWhenLastSeqIsNull(t *testing.T) {
 	env := rttest.NewEnv(t)
 	userID := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	inst := env.StartInstance(t, "a")
-	_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{"k": "v"}, userID)
+	_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{"k": "v"}, userID)
 	require.NoError(t, err)
 
 	c := inst.Dial(t, userID)
@@ -66,7 +67,7 @@ func TestHandshakeDeltaWhenLogCoversGap(t *testing.T) {
 	userID := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	inst := env.StartInstance(t, "a")
 	for range 3 {
-		_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{"k": "v"}, userID)
+		_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{"k": "v"}, userID)
 		require.NoError(t, err)
 	}
 
@@ -87,7 +88,7 @@ func TestHandshakeEmptyDeltaWhenClientIsCurrent(t *testing.T) {
 	env := rttest.NewEnv(t)
 	userID := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	inst := env.StartInstance(t, "a")
-	_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, userID)
+	_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, userID)
 	require.NoError(t, err)
 
 	c := inst.Dial(t, userID)
@@ -105,7 +106,7 @@ func TestHandshakeFallsBackToSnapshotWhenLogIsGoneOrClientIsAhead(t *testing.T) 
 	userID := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	inst := env.StartInstance(t, "a")
 	for range 3 {
-		_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, userID)
+		_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, userID)
 		require.NoError(t, err)
 	}
 	env.Board.Truncate(2)
@@ -126,7 +127,7 @@ func TestHandshakeFallsBackToSnapshotWhenDeltaIsTooLarge(t *testing.T) {
 	userID := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	inst := env.StartInstance(t, "a")
 	for range 3 {
-		_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, userID)
+		_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, userID)
 		require.NoError(t, err)
 	}
 
@@ -166,7 +167,7 @@ func TestOpIsConfirmedThroughFanOutOnBothInstances(t *testing.T) {
 	bobConn.HandshakeSnapshot()
 	annConn.Expect(protocol.TypePresenceJoin)
 
-	opID := sendOp(annConn, protocol.OpCardCreate)
+	opID := sendOp(annConn, boardcontent.OpCardCreate)
 	for _, c := range []*rttest.Conn{annConn, bobConn} {
 		ev := c.Expect("card.create")
 		assert.Equal(t, int64(1), ev.Seq)
@@ -184,9 +185,9 @@ func TestReplayedOpIsSentDirectlyToInitiator(t *testing.T) {
 	c.HandshakeSnapshot()
 
 	opID := uuid.New()
-	c.SendJSON(protocol.OpCardCreate, &opID, map[string]any{"card_id": uuid.New().String()})
+	c.SendJSON(boardcontent.OpCardCreate, &opID, map[string]any{"card_id": uuid.New().String()})
 	first := c.Expect("card.create")
-	c.SendJSON(protocol.OpCardCreate, &opID, map[string]any{"card_id": uuid.New().String()})
+	c.SendJSON(boardcontent.OpCardCreate, &opID, map[string]any{"card_id": uuid.New().String()})
 	again := c.Expect("card.create")
 	assert.Equal(t, first.Seq, again.Seq)
 	assert.Equal(t, 2, env.Board.ApplyCount())
@@ -201,13 +202,13 @@ func TestViewerOpIsNackedWithoutReachingProcessor(t *testing.T) {
 	c := inst.Dial(t, viewer)
 	c.HandshakeSnapshot()
 
-	opID := sendOp(c, protocol.OpCardArchive)
+	opID := sendOp(c, boardcontent.OpCardArchive)
 	nack := c.Expect(protocol.TypeNack)
 	require.NotNil(t, nack.OpID)
 	assert.Equal(t, opID, *nack.OpID)
-	var body protocol.Nack
+	var body boardcontent.Nack
 	require.NoError(t, json.Unmarshal(nack.Payload, &body))
-	assert.Equal(t, protocol.ReasonForbidden, body.Reason)
+	assert.Equal(t, boardcontent.ReasonForbidden, body.Reason)
 	assert.Zero(t, env.Board.ApplyCount())
 }
 
@@ -221,10 +222,10 @@ func TestInfrastructureErrorBecomesInternalNack(t *testing.T) {
 
 	for _, failure := range []error{errors.New("db down"), domain.ErrBusy} {
 		env.Board.FailNextApply(failure)
-		sendOp(c, protocol.OpCardArchive)
-		var body protocol.Nack
+		sendOp(c, boardcontent.OpCardArchive)
+		var body boardcontent.Nack
 		require.NoError(t, json.Unmarshal(c.Expect(protocol.TypeNack).Payload, &body))
-		assert.Equal(t, protocol.ReasonInternal, body.Reason)
+		assert.Equal(t, boardcontent.ReasonInternal, body.Reason)
 	}
 }
 
@@ -235,7 +236,7 @@ func TestOpBeforeSyncReadyIsProtocolErrorAndRepeatClosesConnection(t *testing.T)
 	inst := env.StartInstance(t, "a")
 	c := inst.Dial(t, ann)
 
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	var body protocol.ErrorPayload
 	require.NoError(t, json.Unmarshal(c.Expect(protocol.TypeError).Payload, &body))
 	assert.Equal(t, protocol.CodeProtocolError, body.Code)
@@ -280,14 +281,14 @@ func TestRateLimitedOpsAreNackedAndAbuseClosesConnection(t *testing.T) {
 	c.HandshakeSnapshot()
 
 	for range 2 {
-		sendOp(c, protocol.OpCardCreate)
+		sendOp(c, boardcontent.OpCardCreate)
 		c.Expect("card.create")
 	}
 	for range 3 {
-		sendOp(c, protocol.OpCardCreate)
-		var body protocol.Nack
+		sendOp(c, boardcontent.OpCardCreate)
+		var body boardcontent.Nack
 		require.NoError(t, json.Unmarshal(c.Expect(protocol.TypeNack).Payload, &body))
-		assert.Equal(t, protocol.ReasonRateLimited, body.Reason)
+		assert.Equal(t, boardcontent.ReasonRateLimited, body.Reason)
 	}
 	assert.Equal(t, protocol.CloseRateLimited, c.ExpectClose().Code)
 	assert.Equal(t, 2, env.Board.ApplyCount())
@@ -356,7 +357,7 @@ func TestBoardDeletedClosesAllConnectionsWithEvent(t *testing.T) {
 	_, err := env.Board.Delete(context.Background(), ann)
 	require.NoError(t, err)
 	for _, c := range []*rttest.Conn{annConn, bobConn} {
-		assert.Equal(t, protocol.EventBoardDeleted, drainUntil(c, protocol.EventBoardDeleted).Type)
+		assert.Equal(t, boardcontent.EventBoardDeleted, drainUntil(c, boardcontent.EventBoardDeleted).Type)
 		assert.Equal(t, protocol.CloseBoardDeleted, c.ExpectClose().Code)
 	}
 }
@@ -378,11 +379,11 @@ func TestRenamedEventIsBroadcastWithoutClosing(t *testing.T) {
 	c := inst.Dial(t, ann)
 	c.HandshakeSnapshot()
 
-	_, err := env.Board.Append(context.Background(), protocol.EventBoardRenamed, protocol.BoardRenamed{Title: "New", ActorID: ann}, ann)
+	_, err := env.Board.Append(context.Background(), boardcontent.EventBoardRenamed, boardcontent.BoardRenamed{Title: "New", ActorID: ann}, ann)
 	require.NoError(t, err)
-	ev := c.Expect(protocol.EventBoardRenamed)
+	ev := c.Expect(boardcontent.EventBoardRenamed)
 	assert.Equal(t, int64(1), ev.Seq)
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 }
 
@@ -399,10 +400,10 @@ func TestHubCloseUserAndRoleUpdate(t *testing.T) {
 	annConn.Expect(protocol.TypePresenceJoin)
 
 	inst.Hub.SetRole(env.Board.ID, ann, domain.RoleViewer)
-	sendOp(annConn, protocol.OpCardCreate)
-	var body protocol.Nack
+	sendOp(annConn, boardcontent.OpCardCreate)
+	var body boardcontent.Nack
 	require.NoError(t, json.Unmarshal(annConn.Expect(protocol.TypeNack).Payload, &body))
-	assert.Equal(t, protocol.ReasonForbidden, body.Reason)
+	assert.Equal(t, boardcontent.ReasonForbidden, body.Reason)
 
 	inst.Hub.CloseUser(env.Board.ID, bob, protocol.CloseAccessRevoked, "removed")
 	assert.Equal(t, protocol.CloseAccessRevoked, bobConn.ExpectClose().Code)
@@ -433,7 +434,7 @@ func TestTokenExpiryClosesConnectionAndRefreshExtendsIt(t *testing.T) {
 	waitTimers(t, env, 2)
 
 	env.Clock.Advance(10 * time.Minute)
-	sendOp(c, protocol.OpCardCreate)
+	sendOp(c, boardcontent.OpCardCreate)
 	c.Expect("card.create")
 	waitTimers(t, env, 2)
 
@@ -524,7 +525,7 @@ func TestEventsPublishedDuringHandshakeAreDeliveredOnceAndNeverDuplicated(t *tes
 	userID := rttest.AddUser(env, "Ann", domain.RoleEditor)
 	ctx := context.Background()
 	appendEvent := func() {
-		_, err := env.Board.Append(ctx, protocol.EventCardCreated, map[string]string{}, userID)
+		_, err := env.Board.Append(ctx, boardcontent.EventCardCreated, map[string]string{}, userID)
 		require.NoError(t, err)
 	}
 	var once sync.Once
@@ -547,7 +548,7 @@ func TestEventsPublishedDuringHandshakeAreDeliveredOnceAndNeverDuplicated(t *tes
 	for !ready || len(delivered) == 0 {
 		msg := c.MustNext()
 		switch msg.Type {
-		case protocol.EventCardCreated:
+		case boardcontent.EventCardCreated:
 			delivered = append(delivered, msg.Seq)
 		case protocol.TypeSyncReady:
 			ready = true
@@ -558,7 +559,7 @@ func TestEventsPublishedDuringHandshakeAreDeliveredOnceAndNeverDuplicated(t *tes
 
 func assertNoPresenceLeave(t *testing.T, observer, other *rttest.Conn) {
 	t.Helper()
-	sendOp(other, protocol.OpCardCreate)
+	sendOp(other, boardcontent.OpCardCreate)
 	for {
 		msg := observer.MustNext()
 		require.NotEqual(t, protocol.TypePresenceLeave, msg.Type)
@@ -632,7 +633,7 @@ func TestSlowClientIsDisconnectedWhenSendBufferOverflows(t *testing.T) {
 
 	payload := map[string]string{"blob": string(make([]byte, 256<<10))}
 	assert.Eventually(t, func() bool {
-		_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, payload, ann)
+		_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, payload, ann)
 		require.NoError(t, err)
 		return inst.Hub.ConnectionCount(env.Board.ID) == 0
 	}, 20*time.Second, time.Millisecond)

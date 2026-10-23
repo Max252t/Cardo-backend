@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
@@ -24,7 +25,7 @@ func TestHandshakeBacklogLargerThanTheSendBufferIsFlushedWithoutDisconnecting(t 
 		SyncSource: env.Board,
 		afterRead: func() {
 			for range backlog {
-				_, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, ann)
+				_, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, ann)
 				assert.NoError(t, err)
 			}
 			time.Sleep(300 * time.Millisecond)
@@ -37,7 +38,7 @@ func TestHandshakeBacklogLargerThanTheSendBufferIsFlushedWithoutDisconnecting(t 
 	c.Expect(protocol.TypeSyncSnapshot)
 	c.Expect(protocol.TypePresenceList)
 	for want := int64(1); want <= backlog; want++ {
-		ev := c.Expect(protocol.EventCardCreated)
+		ev := c.Expect(boardcontent.EventCardCreated)
 		require.Equal(t, want, ev.Seq)
 	}
 	c.Expect(protocol.TypeSyncReady)

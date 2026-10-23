@@ -1,4 +1,4 @@
-package protocol
+package boardcontent
 
 import "github.com/Max252t/Cardo-backend/internal/domain"
 

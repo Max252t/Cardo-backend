@@ -19,11 +19,11 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ops"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/testutil"
@@ -484,10 +484,10 @@ func TestFlowSnapshotAndEventLog(t *testing.T) {
 		typ     string
 		payload any
 	}{
-		{protocol.OpColumnCreate, protocol.ColumnCreate{ColumnID: colID, Title: "Todo"}},
-		{protocol.OpCardCreate, protocol.CardCreate{CardID: cardID, ColumnID: colID, Title: "Card"}},
+		{boardcontent.OpColumnCreate, boardcontent.ColumnCreate{ColumnID: colID, Title: "Todo"}},
+		{boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: cardID, ColumnID: colID, Title: "Card"}},
 	} {
-		o, err := protocol.NewOp(op.typ, uuid.New(), op.payload)
+		o, err := boardcontent.NewOp(op.typ, uuid.New(), op.payload)
 		require.NoError(t, err)
 		out, err := proc.Apply(context.Background(), userID, boardID, o)
 		require.NoError(t, err)
@@ -503,8 +503,8 @@ func TestFlowSnapshotAndEventLog(t *testing.T) {
 	page := f.mustJSON(t, http.MethodGet, "/api/boards/"+boardID.String()+"/events?after_seq=0", "", alice.access, http.StatusOK)
 	events := page["events"].([]any)
 	require.Len(t, events, 2)
-	assert.Equal(t, protocol.EventColumnCreated, events[0].(map[string]any)["type"])
-	assert.Equal(t, protocol.EventCardCreated, events[1].(map[string]any)["type"])
+	assert.Equal(t, boardcontent.EventColumnCreated, events[0].(map[string]any)["type"])
+	assert.Equal(t, boardcontent.EventCardCreated, events[1].(map[string]any)["type"])
 
 	f.expectError(t, http.MethodGet, "/api/boards/"+boardID.String()+"/events?after_seq=3", "", alice.access, http.StatusBadRequest, httpapi.CodeValidation)
 	_, err := f.pool.Exec(context.Background(), `DELETE FROM board_events WHERE board_id = $1 AND seq = 1`, boardID)

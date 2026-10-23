@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/google/uuid"
 )
 
@@ -75,14 +76,14 @@ func ParseEnvelope(data []byte) (Envelope, error) {
 	return env, nil
 }
 
-func (e Envelope) AsOp() (Op, error) {
-	if !IsOpType(e.Type) {
-		return Op{}, fmt.Errorf("%w: %q", ErrUnknownType, e.Type)
+func (e Envelope) AsOp() (boardcontent.Op, error) {
+	if !boardcontent.IsOpType(e.Type) {
+		return boardcontent.Op{}, fmt.Errorf("%w: %q", boardcontent.ErrUnknownType, e.Type)
 	}
 	if e.OpID == nil || *e.OpID == uuid.Nil {
-		return Op{}, fmt.Errorf("%w: op_id is required", ErrMalformed)
+		return boardcontent.Op{}, fmt.Errorf("%w: op_id is required", ErrMalformed)
 	}
-	return Op{Type: e.Type, OpID: *e.OpID, Payload: e.Payload}, nil
+	return boardcontent.Op{Type: e.Type, OpID: *e.OpID, Payload: e.Payload}, nil
 }
 
 func NewEnvelope(msgType string, payload any) (Envelope, error) {

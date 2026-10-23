@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
@@ -91,7 +92,7 @@ func TestPresenceJoinIsAnnouncedOncePerUserAndNeverEchoedToThatUser(t *testing.T
 	annSecond := b.Dial(t, ann)
 	annSecond.HandshakeSnapshot()
 
-	opID := sendOp(annConn, protocol.OpCardCreate)
+	opID := sendOp(annConn, boardcontent.OpCardCreate)
 	for name, c := range map[string]*rttest.Conn{"ann": annConn, "bob phone": bobPhone, "bob tablet": bobTablet, "ann second": annSecond} {
 		for {
 			msg := c.MustNext()
@@ -121,7 +122,7 @@ func TestPresenceLeaveIsAnnouncedOnlyWhenTheLastDeviceGoesAndRejoinAnnouncesAgai
 
 	require.NoError(t, first.Close())
 	waitConnections(t, a, env.Board.ID, 1)
-	opID := sendOp(second, protocol.OpCardCreate)
+	opID := sendOp(second, boardcontent.OpCardCreate)
 	for {
 		msg := watcher.MustNext()
 		require.NotEqual(t, protocol.TypePresenceLeave, msg.Type, "bob is still connected through the other instance")
@@ -173,7 +174,7 @@ func TestHeartbeatKeepsLiveUsersOnlineAcrossManyTTLs(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Ann", "Bob"}, onlineNames(t, probe, env.Board.ID))
 
-	opID := sendOp(bobConn, protocol.OpCardCreate)
+	opID := sendOp(bobConn, boardcontent.OpCardCreate)
 	for {
 		msg := annConn.MustNext()
 		require.NotEqual(t, protocol.TypePresenceLeave, msg.Type, "live users are never swept")
@@ -247,7 +248,7 @@ func TestGhostOfADeadInstanceDoesNotHideAUserWhoIsStillConnectedElsewhere(t *tes
 	require.NoError(t, deadBroker.Close())
 
 	env.Clock.Advance(time.Minute)
-	opID := sendOp(bobConn, protocol.OpCardCreate)
+	opID := sendOp(bobConn, boardcontent.OpCardCreate)
 	for {
 		msg := watcher.MustNext()
 		require.NotEqual(t, protocol.TypePresenceLeave, msg.Type, "bob is still connected to a live instance")

@@ -6,10 +6,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 const MaxEventsPerPage = 1000
@@ -98,7 +98,7 @@ func (s *Service) Rename(ctx context.Context, userID, boardID uuid.UUID, title s
 		if err := btx.SetTitle(ctx, clean); err != nil {
 			return err
 		}
-		ev, err = appendUserEvent(ctx, btx, userID, domain.EventBoardRenamed, protocol.BoardRenamed{Title: clean, ActorID: userID})
+		ev, err = appendUserEvent(ctx, btx, userID, domain.EventBoardRenamed, boardcontent.BoardRenamed{Title: clean, ActorID: userID})
 		if err != nil {
 			return err
 		}
@@ -119,7 +119,7 @@ func (s *Service) Delete(ctx context.Context, userID, boardID uuid.UUID) (domain
 			return err
 		}
 		var err error
-		if ev, err = appendUserEvent(ctx, btx, userID, domain.EventBoardDeleted, protocol.BoardDeleted{ActorID: userID}); err != nil {
+		if ev, err = appendUserEvent(ctx, btx, userID, domain.EventBoardDeleted, boardcontent.BoardDeleted{ActorID: userID}); err != nil {
 			return err
 		}
 		return btx.MarkDeleted(ctx)

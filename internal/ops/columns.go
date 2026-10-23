@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
-func (a *applier) columnCreate(ctx context.Context, p *protocol.ColumnCreate) error {
+func (a *applier) columnCreate(ctx context.Context, p *boardcontent.ColumnCreate) error {
 	if err := requireID("column_id", p.ColumnID); err != nil {
 		return err
 	}
@@ -31,10 +31,10 @@ func (a *applier) columnCreate(ctx context.Context, p *protocol.ColumnCreate) er
 	if err != nil {
 		return fmt.Errorf("insert column: %w", err)
 	}
-	return a.emit(ctx, protocol.EventColumnCreated, protocol.ColumnCreated{Column: protocol.FromColumn(col), ActorID: a.actor})
+	return a.emit(ctx, boardcontent.EventColumnCreated, boardcontent.ColumnCreated{Column: boardcontent.FromColumn(col), ActorID: a.actor})
 }
 
-func (a *applier) columnRename(ctx context.Context, p *protocol.ColumnRename) error {
+func (a *applier) columnRename(ctx context.Context, p *boardcontent.ColumnRename) error {
 	if err := requireID("column_id", p.ColumnID); err != nil {
 		return err
 	}
@@ -46,7 +46,7 @@ func (a *applier) columnRename(ctx context.Context, p *protocol.ColumnRename) er
 	if err != nil {
 		return missingAsNotFound(err, "column not found")
 	}
-	return a.emit(ctx, protocol.EventColumnRenamed, protocol.ColumnRenamed{
+	return a.emit(ctx, boardcontent.EventColumnRenamed, boardcontent.ColumnRenamed{
 		ColumnID: col.ID,
 		Title:    col.Title,
 		Version:  col.Version,
@@ -54,7 +54,7 @@ func (a *applier) columnRename(ctx context.Context, p *protocol.ColumnRename) er
 	})
 }
 
-func (a *applier) columnMove(ctx context.Context, p *protocol.ColumnMove) error {
+func (a *applier) columnMove(ctx context.Context, p *boardcontent.ColumnMove) error {
 	if err := requireID("column_id", p.ColumnID); err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func (a *applier) columnMove(ctx context.Context, p *protocol.ColumnMove) error 
 	if err != nil {
 		return fmt.Errorf("move column: %w", err)
 	}
-	return a.emit(ctx, protocol.EventColumnMoved, protocol.ColumnMoved{
+	return a.emit(ctx, boardcontent.EventColumnMoved, boardcontent.ColumnMoved{
 		ColumnID: moved.ID,
 		Rank:     moved.Rank,
 		Version:  moved.Version,
@@ -84,7 +84,7 @@ func (a *applier) columnMove(ctx context.Context, p *protocol.ColumnMove) error 
 	})
 }
 
-func (a *applier) columnArchive(ctx context.Context, p *protocol.ColumnArchive) error {
+func (a *applier) columnArchive(ctx context.Context, p *boardcontent.ColumnArchive) error {
 	if err := requireID("column_id", p.ColumnID); err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (a *applier) columnArchive(ctx context.Context, p *protocol.ColumnArchive) 
 	if err != nil {
 		return missingAsNotFound(err, "column not found")
 	}
-	return a.emit(ctx, protocol.EventColumnArchived, protocol.ColumnArchived{
+	return a.emit(ctx, boardcontent.EventColumnArchived, boardcontent.ColumnArchived{
 		ColumnID: col.ID,
 		CardIDs:  cardIDs,
 		Version:  col.Version,
@@ -108,11 +108,11 @@ func (a *applier) emitColumnRebalance(ctx context.Context, pl placement) error {
 	if pl.rebalance == nil {
 		return nil
 	}
-	cols := make([]protocol.ColumnRank, len(pl.rebalance))
+	cols := make([]boardcontent.ColumnRank, len(pl.rebalance))
 	for i, it := range pl.rebalance {
-		cols[i] = protocol.ColumnRank{ColumnID: it.ID, Rank: it.Rank}
+		cols[i] = boardcontent.ColumnRank{ColumnID: it.ID, Rank: it.Rank}
 	}
-	return a.emitExtra(ctx, protocol.EventColumnsRebalanced, protocol.ColumnsRebalanced{
+	return a.emitExtra(ctx, boardcontent.EventColumnsRebalanced, boardcontent.ColumnsRebalanced{
 		Columns: cols,
 		ActorID: a.actor,
 	})

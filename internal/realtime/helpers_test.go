@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/realtime/rttest"
@@ -60,7 +61,7 @@ func appendEvents(t testing.TB, env *rttest.Env, actor uuid.UUID, n int) []int64
 	t.Helper()
 	seqs := make([]int64, 0, n)
 	for range n {
-		ev, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, actor)
+		ev, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, actor)
 		require.NoError(t, err)
 		seqs = append(seqs, ev.Seq)
 	}
@@ -120,7 +121,7 @@ func errorCode(t testing.TB, env protocol.Envelope) string {
 func nackReason(t testing.TB, env protocol.Envelope) string {
 	t.Helper()
 	require.Equal(t, protocol.TypeNack, env.Type)
-	return decodeAs[protocol.Nack](t, env).Reason
+	return decodeAs[boardcontent.Nack](t, env).Reason
 }
 
 func newEditorEnv(t testing.TB, cfg func(*rttest.Env)) (*rttest.Env, uuid.UUID, *rttest.Instance) {

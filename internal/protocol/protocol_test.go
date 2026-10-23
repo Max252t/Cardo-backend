@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -30,8 +31,8 @@ func envelope(opType, payload string) []byte {
 func TestParseOpAcceptsEveryOpType(t *testing.T) {
 	t.Parallel()
 	types := []string{
-		protocol.OpCardCreate, protocol.OpCardEdit, protocol.OpCardMove, protocol.OpCardArchive,
-		protocol.OpColumnCreate, protocol.OpColumnRename, protocol.OpColumnMove, protocol.OpColumnArchive,
+		boardcontent.OpCardCreate, boardcontent.OpCardEdit, boardcontent.OpCardMove, boardcontent.OpCardArchive,
+		boardcontent.OpColumnCreate, boardcontent.OpColumnRename, boardcontent.OpColumnMove, boardcontent.OpColumnArchive,
 	}
 	for _, typ := range types {
 		t.Run(typ, func(t *testing.T) {
@@ -41,7 +42,7 @@ func TestParseOpAcceptsEveryOpType(t *testing.T) {
 			assert.Equal(t, typ, op.Type)
 			assert.Equal(t, opID, op.OpID)
 			assert.JSONEq(t, `{"k":1}`, string(op.Payload))
-			assert.True(t, protocol.IsOpType(typ))
+			assert.True(t, boardcontent.IsOpType(typ))
 		})
 	}
 }
@@ -51,7 +52,7 @@ func TestParseOpIgnoresServerOnlyEnvelopeFields(t *testing.T) {
 	data := `{"v":1,"type":"op.card.archive","op_id":"` + opID.String() + `","seq":99,"server_ts":123,"extra":true,"payload":{"card_id":"` + cardA.String() + `"}}`
 	op, err := protocol.ParseOp([]byte(data))
 	require.NoError(t, err)
-	assert.Equal(t, protocol.OpCardArchive, op.Type)
+	assert.Equal(t, boardcontent.OpCardArchive, op.Type)
 }
 
 func TestParseOpWithoutPayload(t *testing.T) {
@@ -59,7 +60,7 @@ func TestParseOpWithoutPayload(t *testing.T) {
 	op, err := protocol.ParseOp([]byte(`{"v":1,"type":"op.card.archive","op_id":"` + opID.String() + `"}`))
 	require.NoError(t, err)
 	assert.Empty(t, op.Payload)
-	_, err = protocol.DecodePayload(op)
+	_, err = boardcontent.DecodePayload(op)
 	var vErr *domain.ValidationError
 	require.ErrorAs(t, err, &vErr)
 	assert.Equal(t, "payload", vErr.Field)
@@ -87,20 +88,20 @@ func TestParseOpErrors(t *testing.T) {
 		{"zero version", `{"v":0,"type":"op.card.archive","op_id":"` + opID.String() + `"}`, protocol.ErrUnsupportedVersion},
 		{"future version", `{"v":2,"type":"op.card.archive","op_id":"` + opID.String() + `"}`, protocol.ErrUnsupportedVersion},
 		{"negative version", `{"v":-1,"type":"op.card.archive","op_id":"` + opID.String() + `"}`, protocol.ErrUnsupportedVersion},
-		{"missing type", `{"v":1,"op_id":"` + opID.String() + `"}`, protocol.ErrUnknownType},
-		{"empty type", `{"v":1,"type":"","op_id":"` + opID.String() + `"}`, protocol.ErrUnknownType},
-		{"unknown type", `{"v":1,"type":"op.card.explode","op_id":"` + opID.String() + `"}`, protocol.ErrUnknownType},
-		{"event type is not an op", `{"v":1,"type":"card.created","op_id":"` + opID.String() + `"}`, protocol.ErrUnknownType},
-		{"nack is not an op", `{"v":1,"type":"nack","op_id":"` + opID.String() + `"}`, protocol.ErrUnknownType},
-		{"hello is not an op", `{"v":1,"type":"hello"}`, protocol.ErrUnknownType},
-		{"type is case sensitive", `{"v":1,"type":"OP.CARD.ARCHIVE","op_id":"` + opID.String() + `"}`, protocol.ErrUnknownType},
+		{"missing type", `{"v":1,"op_id":"` + opID.String() + `"}`, boardcontent.ErrUnknownType},
+		{"empty type", `{"v":1,"type":"","op_id":"` + opID.String() + `"}`, boardcontent.ErrUnknownType},
+		{"unknown type", `{"v":1,"type":"op.card.explode","op_id":"` + opID.String() + `"}`, boardcontent.ErrUnknownType},
+		{"event type is not an op", `{"v":1,"type":"card.created","op_id":"` + opID.String() + `"}`, boardcontent.ErrUnknownType},
+		{"nack is not an op", `{"v":1,"type":"nack","op_id":"` + opID.String() + `"}`, boardcontent.ErrUnknownType},
+		{"hello is not an op", `{"v":1,"type":"hello"}`, boardcontent.ErrUnknownType},
+		{"type is case sensitive", `{"v":1,"type":"OP.CARD.ARCHIVE","op_id":"` + opID.String() + `"}`, boardcontent.ErrUnknownType},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			op, err := protocol.ParseOp([]byte(tt.data))
 			require.ErrorIs(t, err, tt.want)
-			assert.Equal(t, protocol.Op{}, op)
+			assert.Equal(t, boardcontent.Op{}, op)
 		})
 	}
 }
@@ -109,13 +110,13 @@ func TestParseOpVersionCheckPrecedesTypeCheck(t *testing.T) {
 	t.Parallel()
 	_, err := protocol.ParseOp([]byte(`{"v":9,"type":"nonsense"}`))
 	assert.ErrorIs(t, err, protocol.ErrUnsupportedVersion)
-	assert.NotErrorIs(t, err, protocol.ErrUnknownType)
+	assert.NotErrorIs(t, err, boardcontent.ErrUnknownType)
 }
 
 func TestIsOpType(t *testing.T) {
 	t.Parallel()
 	for _, typ := range []string{"", "card.created", "nack", "op.card", "op.board.rename"} {
-		assert.False(t, protocol.IsOpType(typ), typ)
+		assert.False(t, boardcontent.IsOpType(typ), typ)
 	}
 }
 
@@ -132,65 +133,65 @@ func TestDecodePayloadHappyPaths(t *testing.T) {
 		want    any
 	}{
 		{
-			"card create full", protocol.OpCardCreate,
+			"card create full", boardcontent.OpCardCreate,
 			`{"card_id":"` + cardA.String() + `","column_id":"` + colA.String() + `","title":"T","description":"D","after_id":"` + cardB.String() + `","before_id":"` + cardA.String() + `"}`,
-			&protocol.CardCreate{CardID: cardA, ColumnID: colA, Title: "T", Description: &desc, AfterID: &cardB, BeforeID: &cardA},
+			&boardcontent.CardCreate{CardID: cardA, ColumnID: colA, Title: "T", Description: &desc, AfterID: &cardB, BeforeID: &cardA},
 		},
 		{
-			"card create minimal", protocol.OpCardCreate,
+			"card create minimal", boardcontent.OpCardCreate,
 			`{"card_id":"` + cardA.String() + `","column_id":"` + colA.String() + `","title":"T"}`,
-			&protocol.CardCreate{CardID: cardA, ColumnID: colA, Title: "T"},
+			&boardcontent.CardCreate{CardID: cardA, ColumnID: colA, Title: "T"},
 		},
 		{
-			"card edit title", protocol.OpCardEdit,
+			"card edit title", boardcontent.OpCardEdit,
 			`{"card_id":"` + cardA.String() + `","title":"T"}`,
-			&protocol.CardEdit{CardID: cardA, Title: &title},
+			&boardcontent.CardEdit{CardID: cardA, Title: &title},
 		},
 		{
-			"card edit description", protocol.OpCardEdit,
+			"card edit description", boardcontent.OpCardEdit,
 			`{"card_id":"` + cardA.String() + `","description":"D","base_description_version":14}`,
-			&protocol.CardEdit{CardID: cardA, Description: &desc, BaseDescriptionVersion: &version},
+			&boardcontent.CardEdit{CardID: cardA, Description: &desc, BaseDescriptionVersion: &version},
 		},
 		{
-			"card move", protocol.OpCardMove,
+			"card move", boardcontent.OpCardMove,
 			`{"card_id":"` + cardA.String() + `","to_column_id":"` + colB.String() + `","after_id":"` + cardB.String() + `","base_version":14}`,
-			&protocol.CardMove{CardID: cardA, ToColumnID: colB, AfterID: &cardB, BaseVersion: &version},
+			&boardcontent.CardMove{CardID: cardA, ToColumnID: colB, AfterID: &cardB, BaseVersion: &version},
 		},
 		{
-			"card archive", protocol.OpCardArchive,
+			"card archive", boardcontent.OpCardArchive,
 			`{"card_id":"` + cardA.String() + `"}`,
-			&protocol.CardArchive{CardID: cardA},
+			&boardcontent.CardArchive{CardID: cardA},
 		},
 		{
-			"column create", protocol.OpColumnCreate,
+			"column create", boardcontent.OpColumnCreate,
 			`{"column_id":"` + colA.String() + `","title":"T","before_id":"` + colB.String() + `"}`,
-			&protocol.ColumnCreate{ColumnID: colA, Title: "T", BeforeID: &colB},
+			&boardcontent.ColumnCreate{ColumnID: colA, Title: "T", BeforeID: &colB},
 		},
 		{
-			"column rename", protocol.OpColumnRename,
+			"column rename", boardcontent.OpColumnRename,
 			`{"column_id":"` + colA.String() + `","title":"T"}`,
-			&protocol.ColumnRename{ColumnID: colA, Title: "T"},
+			&boardcontent.ColumnRename{ColumnID: colA, Title: "T"},
 		},
 		{
-			"column move", protocol.OpColumnMove,
+			"column move", boardcontent.OpColumnMove,
 			`{"column_id":"` + colA.String() + `","after_id":"` + colB.String() + `","base_version":14}`,
-			&protocol.ColumnMove{ColumnID: colA, AfterID: &colB, BaseVersion: &version},
+			&boardcontent.ColumnMove{ColumnID: colA, AfterID: &colB, BaseVersion: &version},
 		},
 		{
-			"column archive", protocol.OpColumnArchive,
+			"column archive", boardcontent.OpColumnArchive,
 			`{"column_id":"` + colA.String() + `"}`,
-			&protocol.ColumnArchive{ColumnID: colA},
+			&boardcontent.ColumnArchive{ColumnID: colA},
 		},
 		{
-			"whitespace around object", protocol.OpColumnArchive,
+			"whitespace around object", boardcontent.OpColumnArchive,
 			"  \n{\"column_id\":\"" + colA.String() + "\"}\n  ",
-			&protocol.ColumnArchive{ColumnID: colA},
+			&boardcontent.ColumnArchive{ColumnID: colA},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := protocol.DecodePayload(protocol.Op{Type: tt.opType, OpID: opID, Payload: json.RawMessage(tt.payload)})
+			got, err := boardcontent.DecodePayload(boardcontent.Op{Type: tt.opType, OpID: opID, Payload: json.RawMessage(tt.payload)})
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -206,31 +207,31 @@ func TestDecodePayloadIsStrict(t *testing.T) {
 		payload     string
 		wantMessage string
 	}{
-		{"unknown field on card create", protocol.OpCardCreate, `{"card_id":"` + card + `","column_id":"` + col + `","title":"T","extra":1}`, "unknown field"},
-		{"unknown field on card edit", protocol.OpCardEdit, `{"card_id":"` + card + `","title":"T","assignee":"x"}`, "unknown field"},
-		{"unknown field on card move", protocol.OpCardMove, `{"card_id":"` + card + `","to_column_id":"` + col + `","base_version":1,"rank":"a0"}`, "unknown field"},
-		{"unknown field on card archive", protocol.OpCardArchive, `{"card_id":"` + card + `","force":true}`, "unknown field"},
-		{"unknown field on column create", protocol.OpColumnCreate, `{"column_id":"` + col + `","title":"T","rank":"a0"}`, "unknown field"},
-		{"unknown field on column rename", protocol.OpColumnRename, `{"column_id":"` + col + `","title":"T","x":1}`, "unknown field"},
-		{"unknown field on column move", protocol.OpColumnMove, `{"column_id":"` + col + `","base_version":1,"x":1}`, "unknown field"},
-		{"unknown field on column archive", protocol.OpColumnArchive, `{"column_id":"` + col + `","x":1}`, "unknown field"},
-		{"wrong type for title", protocol.OpCardCreate, `{"card_id":"` + card + `","column_id":"` + col + `","title":5}`, "title"},
-		{"wrong type for base_version", protocol.OpCardMove, `{"card_id":"` + card + `","to_column_id":"` + col + `","base_version":"1"}`, "base_version"},
-		{"fractional base_version", protocol.OpCardMove, `{"card_id":"` + card + `","to_column_id":"` + col + `","base_version":1.5}`, "base_version"},
-		{"invalid uuid", protocol.OpCardArchive, `{"card_id":"nope"}`, "is not a valid JSON object"},
-		{"payload is an array", protocol.OpCardArchive, `[]`, "is not a valid JSON object"},
-		{"payload is a string", protocol.OpCardArchive, `"x"`, "is not a valid JSON object"},
-		{"payload is a number", protocol.OpCardArchive, `7`, "is not a valid JSON object"},
-		{"truncated payload", protocol.OpCardArchive, `{"card_id":`, "is not a valid JSON object"},
-		{"two objects", protocol.OpCardArchive, `{"card_id":"` + card + `"}{"card_id":"` + card + `"}`, "single JSON object"},
-		{"trailing garbage", protocol.OpCardArchive, `{"card_id":"` + card + `"} x`, "single JSON object"},
-		{"empty payload", protocol.OpCardArchive, ``, "is required"},
-		{"blank payload", protocol.OpCardArchive, "  \n\t", "is required"},
+		{"unknown field on card create", boardcontent.OpCardCreate, `{"card_id":"` + card + `","column_id":"` + col + `","title":"T","extra":1}`, "unknown field"},
+		{"unknown field on card edit", boardcontent.OpCardEdit, `{"card_id":"` + card + `","title":"T","assignee":"x"}`, "unknown field"},
+		{"unknown field on card move", boardcontent.OpCardMove, `{"card_id":"` + card + `","to_column_id":"` + col + `","base_version":1,"rank":"a0"}`, "unknown field"},
+		{"unknown field on card archive", boardcontent.OpCardArchive, `{"card_id":"` + card + `","force":true}`, "unknown field"},
+		{"unknown field on column create", boardcontent.OpColumnCreate, `{"column_id":"` + col + `","title":"T","rank":"a0"}`, "unknown field"},
+		{"unknown field on column rename", boardcontent.OpColumnRename, `{"column_id":"` + col + `","title":"T","x":1}`, "unknown field"},
+		{"unknown field on column move", boardcontent.OpColumnMove, `{"column_id":"` + col + `","base_version":1,"x":1}`, "unknown field"},
+		{"unknown field on column archive", boardcontent.OpColumnArchive, `{"column_id":"` + col + `","x":1}`, "unknown field"},
+		{"wrong type for title", boardcontent.OpCardCreate, `{"card_id":"` + card + `","column_id":"` + col + `","title":5}`, "title"},
+		{"wrong type for base_version", boardcontent.OpCardMove, `{"card_id":"` + card + `","to_column_id":"` + col + `","base_version":"1"}`, "base_version"},
+		{"fractional base_version", boardcontent.OpCardMove, `{"card_id":"` + card + `","to_column_id":"` + col + `","base_version":1.5}`, "base_version"},
+		{"invalid uuid", boardcontent.OpCardArchive, `{"card_id":"nope"}`, "is not a valid JSON object"},
+		{"payload is an array", boardcontent.OpCardArchive, `[]`, "is not a valid JSON object"},
+		{"payload is a string", boardcontent.OpCardArchive, `"x"`, "is not a valid JSON object"},
+		{"payload is a number", boardcontent.OpCardArchive, `7`, "is not a valid JSON object"},
+		{"truncated payload", boardcontent.OpCardArchive, `{"card_id":`, "is not a valid JSON object"},
+		{"two objects", boardcontent.OpCardArchive, `{"card_id":"` + card + `"}{"card_id":"` + card + `"}`, "single JSON object"},
+		{"trailing garbage", boardcontent.OpCardArchive, `{"card_id":"` + card + `"} x`, "single JSON object"},
+		{"empty payload", boardcontent.OpCardArchive, ``, "is required"},
+		{"blank payload", boardcontent.OpCardArchive, "  \n\t", "is required"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := protocol.DecodePayload(protocol.Op{Type: tt.opType, OpID: opID, Payload: json.RawMessage(tt.payload)})
+			got, err := boardcontent.DecodePayload(boardcontent.Op{Type: tt.opType, OpID: opID, Payload: json.RawMessage(tt.payload)})
 			require.Error(t, err)
 			assert.Nil(t, got)
 			var vErr *domain.ValidationError
@@ -244,23 +245,23 @@ func TestDecodePayloadIsStrict(t *testing.T) {
 func TestDecodePayloadDoesNotEchoPayloadValues(t *testing.T) {
 	t.Parallel()
 	secret := "very-secret-token-value"
-	_, err := protocol.DecodePayload(protocol.Op{Type: protocol.OpCardArchive, Payload: json.RawMessage(`{"card_id":"` + cardA.String() + `","` + secret + `":1}`)})
+	_, err := boardcontent.DecodePayload(boardcontent.Op{Type: boardcontent.OpCardArchive, Payload: json.RawMessage(`{"card_id":"` + cardA.String() + `","` + secret + `":1}`)})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), secret, "unknown field names are reported so clients can fix typos")
 
-	_, err = protocol.DecodePayload(protocol.Op{Type: protocol.OpCardCreate, Payload: json.RawMessage(`{"title":"` + secret + `","card_id":5}`)})
+	_, err = boardcontent.DecodePayload(boardcontent.Op{Type: boardcontent.OpCardCreate, Payload: json.RawMessage(`{"title":"` + secret + `","card_id":5}`)})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), secret)
 }
 
 func TestDecodePayloadAcceptsBaseDescriptionVersionAloneAtTheWireLevel(t *testing.T) {
 	t.Parallel()
-	got, err := protocol.DecodePayload(protocol.Op{
-		Type:    protocol.OpCardEdit,
+	got, err := boardcontent.DecodePayload(boardcontent.Op{
+		Type:    boardcontent.OpCardEdit,
 		Payload: json.RawMessage(`{"card_id":"` + cardA.String() + `","base_description_version":3}`),
 	})
 	require.NoError(t, err)
-	edit, ok := got.(*protocol.CardEdit)
+	edit, ok := got.(*boardcontent.CardEdit)
 	require.True(t, ok)
 	require.NotNil(t, edit.BaseDescriptionVersion)
 	assert.Equal(t, int64(3), *edit.BaseDescriptionVersion)
@@ -269,9 +270,9 @@ func TestDecodePayloadAcceptsBaseDescriptionVersionAloneAtTheWireLevel(t *testin
 
 func TestDecodePayloadNullPayload(t *testing.T) {
 	t.Parallel()
-	got, err := protocol.DecodePayload(protocol.Op{Type: protocol.OpCardArchive, Payload: json.RawMessage(`null`)})
+	got, err := boardcontent.DecodePayload(boardcontent.Op{Type: boardcontent.OpCardArchive, Payload: json.RawMessage(`null`)})
 	require.NoError(t, err)
-	archive, ok := got.(*protocol.CardArchive)
+	archive, ok := got.(*boardcontent.CardArchive)
 	require.True(t, ok)
 	assert.Equal(t, uuid.Nil, archive.CardID, "required ids are enforced by the processor, not by the decoder")
 }
@@ -279,8 +280,8 @@ func TestDecodePayloadNullPayload(t *testing.T) {
 func TestDecodePayloadUnknownType(t *testing.T) {
 	t.Parallel()
 	for _, typ := range []string{"", "op.nope", "card.created"} {
-		got, err := protocol.DecodePayload(protocol.Op{Type: typ, Payload: json.RawMessage(`{}`)})
-		assert.ErrorIs(t, err, protocol.ErrUnknownType, typ)
+		got, err := boardcontent.DecodePayload(boardcontent.Op{Type: typ, Payload: json.RawMessage(`{}`)})
+		assert.ErrorIs(t, err, boardcontent.ErrUnknownType, typ)
 		assert.Nil(t, got)
 	}
 }
@@ -288,20 +289,20 @@ func TestDecodePayloadUnknownType(t *testing.T) {
 func TestNewOpRoundTripsThroughParseOp(t *testing.T) {
 	t.Parallel()
 	title := "Hello"
-	op, err := protocol.NewOp(protocol.OpCardEdit, opID, protocol.CardEdit{CardID: cardA, Title: &title})
+	op, err := boardcontent.NewOp(boardcontent.OpCardEdit, opID, boardcontent.CardEdit{CardID: cardA, Title: &title})
 	require.NoError(t, err)
-	assert.Equal(t, protocol.OpCardEdit, op.Type)
+	assert.Equal(t, boardcontent.OpCardEdit, op.Type)
 	assert.Equal(t, opID, op.OpID)
 
 	wire, err := json.Marshal(protocol.Envelope{V: protocol.Version, Type: op.Type, OpID: &op.OpID, Payload: op.Payload})
 	require.NoError(t, err)
 	parsed, err := protocol.ParseOp(wire)
 	require.NoError(t, err)
-	decoded, err := protocol.DecodePayload(parsed)
+	decoded, err := boardcontent.DecodePayload(parsed)
 	require.NoError(t, err)
-	assert.Equal(t, &protocol.CardEdit{CardID: cardA, Title: &title}, decoded)
+	assert.Equal(t, &boardcontent.CardEdit{CardID: cardA, Title: &title}, decoded)
 
-	_, err = protocol.NewOp(protocol.OpCardEdit, opID, make(chan int))
+	_, err = boardcontent.NewOp(boardcontent.OpCardEdit, opID, make(chan int))
 	assert.Error(t, err)
 }
 
@@ -318,12 +319,12 @@ func TestEventEnvelopeShape(t *testing.T) {
 	t.Parallel()
 	actor := uuid.New()
 	created := time.UnixMilli(1710000000123).UTC()
-	payload := protocol.CardMoved{CardID: cardA, FromColumnID: colA, ToColumnID: colB, Rank: "a0V", Version: 15, ActorID: actor}
+	payload := boardcontent.CardMoved{CardID: cardA, FromColumnID: colA, ToColumnID: colB, Rank: "a0V", Version: 15, ActorID: actor}
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
 
 	env := protocol.EventEnvelope(domain.Event{
-		BoardID: uuid.New(), Seq: 129, Type: protocol.EventCardMoved, Payload: raw, OpID: &opID, ActorID: &actor, CreatedAt: created,
+		BoardID: uuid.New(), Seq: 129, Type: boardcontent.EventCardMoved, Payload: raw, OpID: &opID, ActorID: &actor, CreatedAt: created,
 	})
 	m := marshalMap(t, env)
 	assert.Equal(t, float64(1), m["v"])
@@ -342,7 +343,7 @@ func TestEventEnvelopeShape(t *testing.T) {
 func TestEventEnvelopeOmitsOpIDForSystemEvents(t *testing.T) {
 	t.Parallel()
 	env := protocol.EventEnvelope(domain.Event{
-		Seq: 5, Type: protocol.EventColumnRebalanced, Payload: json.RawMessage(`{"column_id":"x","cards":[]}`), CreatedAt: time.UnixMilli(1),
+		Seq: 5, Type: boardcontent.EventColumnRebalanced, Payload: json.RawMessage(`{"column_id":"x","cards":[]}`), CreatedAt: time.UnixMilli(1),
 	})
 	m := marshalMap(t, env)
 	assert.NotContains(t, m, "op_id")
@@ -352,7 +353,7 @@ func TestEventEnvelopeOmitsOpIDForSystemEvents(t *testing.T) {
 
 func TestNackEnvelopeShape(t *testing.T) {
 	t.Parallel()
-	env, err := protocol.NackEnvelope(opID, protocol.Nack{Reason: protocol.ReasonVersionConflict, AtSeq: 131, Message: "card was changed by another user"})
+	env, err := protocol.NackEnvelope(opID, boardcontent.Nack{Reason: boardcontent.ReasonVersionConflict, AtSeq: 131, Message: "card was changed by another user"})
 	require.NoError(t, err)
 	data, err := json.Marshal(env)
 	require.NoError(t, err)
@@ -369,7 +370,7 @@ func TestNackEnvelopeShape(t *testing.T) {
 func TestNackEnvelopeDoesNotAliasOpID(t *testing.T) {
 	t.Parallel()
 	id := opID
-	env, err := protocol.NackEnvelope(id, protocol.Nack{Reason: protocol.ReasonInternal})
+	env, err := protocol.NackEnvelope(id, boardcontent.Nack{Reason: boardcontent.ReasonInternal})
 	require.NoError(t, err)
 	id = uuid.New()
 	require.NotNil(t, env.OpID)
@@ -379,38 +380,38 @@ func TestNackEnvelopeDoesNotAliasOpID(t *testing.T) {
 
 func TestNackReasonsMatchSpec(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "version_conflict", protocol.ReasonVersionConflict)
-	assert.Equal(t, "not_found", protocol.ReasonNotFound)
-	assert.Equal(t, "forbidden", protocol.ReasonForbidden)
-	assert.Equal(t, "validation_error", protocol.ReasonValidation)
-	assert.Equal(t, "rate_limited", protocol.ReasonRateLimited)
-	assert.Equal(t, "internal", protocol.ReasonInternal)
+	assert.Equal(t, "version_conflict", boardcontent.ReasonVersionConflict)
+	assert.Equal(t, "not_found", boardcontent.ReasonNotFound)
+	assert.Equal(t, "forbidden", boardcontent.ReasonForbidden)
+	assert.Equal(t, "validation_error", boardcontent.ReasonValidation)
+	assert.Equal(t, "rate_limited", boardcontent.ReasonRateLimited)
+	assert.Equal(t, "internal", boardcontent.ReasonInternal)
 	assert.Equal(t, "protocol_error", protocol.CodeProtocolError)
 }
 
 func TestEventTypeNamesMatchSpec(t *testing.T) {
 	t.Parallel()
 	want := map[string]string{
-		protocol.EventCardCreated:       "card.created",
-		protocol.EventCardEdited:        "card.edited",
-		protocol.EventCardMoved:         "card.moved",
-		protocol.EventCardArchived:      "card.archived",
-		protocol.EventColumnCreated:     "column.created",
-		protocol.EventColumnRenamed:     "column.renamed",
-		protocol.EventColumnMoved:       "column.moved",
-		protocol.EventColumnArchived:    "column.archived",
-		protocol.EventColumnRebalanced:  "column.rebalanced",
-		protocol.EventColumnsRebalanced: "columns.rebalanced",
-		protocol.EventBoardRenamed:      "board.renamed",
-		protocol.EventBoardDeleted:      "board.deleted",
-		protocol.OpCardCreate:           "op.card.create",
-		protocol.OpCardEdit:             "op.card.edit",
-		protocol.OpCardMove:             "op.card.move",
-		protocol.OpCardArchive:          "op.card.archive",
-		protocol.OpColumnCreate:         "op.column.create",
-		protocol.OpColumnRename:         "op.column.rename",
-		protocol.OpColumnMove:           "op.column.move",
-		protocol.OpColumnArchive:        "op.column.archive",
+		boardcontent.EventCardCreated:       "card.created",
+		boardcontent.EventCardEdited:        "card.edited",
+		boardcontent.EventCardMoved:         "card.moved",
+		boardcontent.EventCardArchived:      "card.archived",
+		boardcontent.EventColumnCreated:     "column.created",
+		boardcontent.EventColumnRenamed:     "column.renamed",
+		boardcontent.EventColumnMoved:       "column.moved",
+		boardcontent.EventColumnArchived:    "column.archived",
+		boardcontent.EventColumnRebalanced:  "column.rebalanced",
+		boardcontent.EventColumnsRebalanced: "columns.rebalanced",
+		boardcontent.EventBoardRenamed:      "board.renamed",
+		boardcontent.EventBoardDeleted:      "board.deleted",
+		boardcontent.OpCardCreate:           "op.card.create",
+		boardcontent.OpCardEdit:             "op.card.edit",
+		boardcontent.OpCardMove:             "op.card.move",
+		boardcontent.OpCardArchive:          "op.card.archive",
+		boardcontent.OpColumnCreate:         "op.column.create",
+		boardcontent.OpColumnRename:         "op.column.rename",
+		boardcontent.OpColumnMove:           "op.column.move",
+		boardcontent.OpColumnArchive:        "op.column.archive",
 	}
 	for got, spec := range want {
 		assert.Equal(t, spec, got)
@@ -430,8 +431,8 @@ func TestEventPayloadShapes(t *testing.T) {
 		want  map[string]any
 	}{
 		{
-			"card.created", protocol.CardCreated{
-				Card:    protocol.Card{ID: cardA, ColumnID: colA, Title: "T", Description: "", Rank: "a0", Version: 1, DescriptionVersion: 1, CreatedBy: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now},
+			"card.created", boardcontent.CardCreated{
+				Card:    boardcontent.Card{ID: cardA, ColumnID: colA, Title: "T", Description: "", Rank: "a0", Version: 1, DescriptionVersion: 1, CreatedBy: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now},
 				ActorID: actor,
 			},
 			map[string]any{
@@ -441,35 +442,35 @@ func TestEventPayloadShapes(t *testing.T) {
 			},
 		},
 		{
-			"card.edited title only", protocol.CardEdited{CardID: cardA, Title: &title, Version: 2, DescriptionVersion: 1, ActorID: actor},
+			"card.edited title only", boardcontent.CardEdited{CardID: cardA, Title: &title, Version: 2, DescriptionVersion: 1, ActorID: actor},
 			map[string]any{"card_id": cardA.String(), "title": "New", "version": float64(2), "description_version": float64(1), "actor_id": actor.String()},
 		},
 		{
-			"card.edited description only", protocol.CardEdited{CardID: cardA, Description: &desc, Version: 3, DescriptionVersion: 2, ActorID: actor},
+			"card.edited description only", boardcontent.CardEdited{CardID: cardA, Description: &desc, Version: 3, DescriptionVersion: 2, ActorID: actor},
 			map[string]any{"card_id": cardA.String(), "description": "Text", "version": float64(3), "description_version": float64(2), "actor_id": actor.String()},
 		},
 		{
-			"card.archived", protocol.CardArchived{CardID: cardA, ColumnID: colA, Version: 4, ActorID: actor},
+			"card.archived", boardcontent.CardArchived{CardID: cardA, ColumnID: colA, Version: 4, ActorID: actor},
 			map[string]any{"card_id": cardA.String(), "column_id": colA.String(), "version": float64(4), "actor_id": actor.String()},
 		},
 		{
-			"column.created", protocol.ColumnCreated{Column: protocol.Column{ID: colA, Title: "Todo", Rank: "a0", Version: 1}, ActorID: actor},
+			"column.created", boardcontent.ColumnCreated{Column: boardcontent.Column{ID: colA, Title: "Todo", Rank: "a0", Version: 1}, ActorID: actor},
 			map[string]any{"id": colA.String(), "title": "Todo", "rank": "a0", "version": float64(1), "actor_id": actor.String()},
 		},
 		{
-			"column.renamed", protocol.ColumnRenamed{ColumnID: colA, Title: "Doing", Version: 2, ActorID: actor},
+			"column.renamed", boardcontent.ColumnRenamed{ColumnID: colA, Title: "Doing", Version: 2, ActorID: actor},
 			map[string]any{"column_id": colA.String(), "title": "Doing", "version": float64(2), "actor_id": actor.String()},
 		},
 		{
-			"column.moved", protocol.ColumnMoved{ColumnID: colA, Rank: "a1", Version: 3, ActorID: actor},
+			"column.moved", boardcontent.ColumnMoved{ColumnID: colA, Rank: "a1", Version: 3, ActorID: actor},
 			map[string]any{"column_id": colA.String(), "rank": "a1", "version": float64(3), "actor_id": actor.String()},
 		},
 		{
-			"column.archived", protocol.ColumnArchived{ColumnID: colA, CardIDs: []uuid.UUID{cardA, cardB}, Version: 5, ActorID: actor},
+			"column.archived", boardcontent.ColumnArchived{ColumnID: colA, CardIDs: []uuid.UUID{cardA, cardB}, Version: 5, ActorID: actor},
 			map[string]any{"column_id": colA.String(), "card_ids": []any{cardA.String(), cardB.String()}, "version": float64(5), "actor_id": actor.String()},
 		},
 		{
-			"column.rebalanced", protocol.ColumnRebalanced{ColumnID: colA, Cards: []protocol.CardRank{{CardID: cardA, Rank: "a0"}, {CardID: cardB, Rank: "a1"}}, ActorID: actor},
+			"column.rebalanced", boardcontent.ColumnRebalanced{ColumnID: colA, Cards: []boardcontent.CardRank{{CardID: cardA, Rank: "a0"}, {CardID: cardB, Rank: "a1"}}, ActorID: actor},
 			map[string]any{
 				"column_id": colA.String(),
 				"cards":     []any{map[string]any{"card_id": cardA.String(), "rank": "a0"}, map[string]any{"card_id": cardB.String(), "rank": "a1"}},
@@ -477,15 +478,15 @@ func TestEventPayloadShapes(t *testing.T) {
 			},
 		},
 		{
-			"columns.rebalanced", protocol.ColumnsRebalanced{Columns: []protocol.ColumnRank{{ColumnID: colA, Rank: "a0"}}, ActorID: actor},
+			"columns.rebalanced", boardcontent.ColumnsRebalanced{Columns: []boardcontent.ColumnRank{{ColumnID: colA, Rank: "a0"}}, ActorID: actor},
 			map[string]any{"columns": []any{map[string]any{"column_id": colA.String(), "rank": "a0"}}, "actor_id": actor.String()},
 		},
 		{
-			"board.renamed", protocol.BoardRenamed{Title: "Roadmap", ActorID: actor},
+			"board.renamed", boardcontent.BoardRenamed{Title: "Roadmap", ActorID: actor},
 			map[string]any{"title": "Roadmap", "actor_id": actor.String()},
 		},
 		{
-			"board.deleted", protocol.BoardDeleted{ActorID: actor},
+			"board.deleted", boardcontent.BoardDeleted{ActorID: actor},
 			map[string]any{"actor_id": actor.String()},
 		},
 	}
@@ -501,13 +502,13 @@ func TestFromCardAndColumnConvertToUTC(t *testing.T) {
 	t.Parallel()
 	loc := time.FixedZone("x", 5*3600)
 	at := time.Date(2030, 1, 1, 5, 0, 0, 0, loc)
-	card := protocol.FromCard(domain.Card{ID: cardA, ColumnID: colA, Title: "T", Description: "D", Rank: "a0", Version: 2, DescriptionVersion: 3, CreatedAt: at, UpdatedAt: at})
+	card := boardcontent.FromCard(domain.Card{ID: cardA, ColumnID: colA, Title: "T", Description: "D", Rank: "a0", Version: 2, DescriptionVersion: 3, CreatedAt: at, UpdatedAt: at})
 	assert.Equal(t, time.UTC, card.CreatedAt.Location())
 	assert.True(t, card.CreatedAt.Equal(at))
 	assert.Equal(t, int64(3), card.DescriptionVersion)
 
-	col := protocol.FromColumn(domain.Column{ID: colA, BoardID: uuid.New(), Title: "C", Rank: "a1", Version: 4})
-	assert.Equal(t, protocol.Column{ID: colA, Title: "C", Rank: "a1", Version: 4}, col)
+	col := boardcontent.FromColumn(domain.Column{ID: colA, BoardID: uuid.New(), Title: "C", Rank: "a1", Version: 4})
+	assert.Equal(t, boardcontent.Column{ID: colA, Title: "C", Rank: "a1", Version: 4}, col)
 }
 
 func TestFromSnapshotShape(t *testing.T) {
@@ -559,8 +560,8 @@ func TestFromEventPage(t *testing.T) {
 		Seq:     10,
 		HasMore: true,
 		Events: []domain.Event{
-			{Seq: 8, Type: protocol.EventCardCreated, Payload: json.RawMessage(`{"a":1}`), OpID: &opID, CreatedAt: time.UnixMilli(1000)},
-			{Seq: 9, Type: protocol.EventColumnRebalanced, Payload: json.RawMessage(`{"b":2}`), CreatedAt: time.UnixMilli(2000)},
+			{Seq: 8, Type: boardcontent.EventCardCreated, Payload: json.RawMessage(`{"a":1}`), OpID: &opID, CreatedAt: time.UnixMilli(1000)},
+			{Seq: 9, Type: boardcontent.EventColumnRebalanced, Payload: json.RawMessage(`{"b":2}`), CreatedAt: time.UnixMilli(2000)},
 		},
 	})
 	m := marshalMap(t, page)

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
@@ -42,7 +43,7 @@ func TestConcurrentJoinsAndLeavesLeaveNoResidue(t *testing.T) {
 				return
 			default:
 			}
-			_, _ = env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{}, users[0])
+			_, _ = env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{}, users[0])
 		}
 	}()
 
@@ -108,9 +109,9 @@ func TestReconnectRaceNeverLeavesAConnectedClientUnsubscribed(t *testing.T) {
 
 		waitConnections(t, inst, board, 1)
 		waitSubscribed(t, inst, board, true)
-		ev, err := env.Board.Append(context.Background(), protocol.EventCardCreated, map[string]string{"round": strconv.Itoa(round)}, ann)
+		ev, err := env.Board.Append(context.Background(), boardcontent.EventCardCreated, map[string]string{"round": strconv.Itoa(round)}, ann)
 		require.NoError(t, err)
-		assert.Equal(t, []int64{ev.Seq}, readEventSeqs(t, fresh, protocol.EventCardCreated, ev.Seq))
+		assert.Equal(t, []int64{ev.Seq}, readEventSeqs(t, fresh, boardcontent.EventCardCreated, ev.Seq))
 
 		require.NoError(t, fresh.Close())
 		waitConnections(t, inst, board, 0)
@@ -196,7 +197,7 @@ func TestConcurrentOperationsWithRoleChangesAndCloses(t *testing.T) {
 			defer wg.Done()
 			for range 20 {
 				opID := uuid.New()
-				c.SendJSON(protocol.OpCardCreate, &opID, map[string]any{"card_id": uuid.NewString()})
+				c.SendJSON(boardcontent.OpCardCreate, &opID, map[string]any{"card_id": uuid.NewString()})
 				if i%2 == 0 {
 					inst.Hub.SetRole(env.Board.ID, ann, domain.RoleViewer)
 					inst.Hub.SetRole(env.Board.ID, ann, domain.RoleEditor)

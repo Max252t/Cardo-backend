@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
-	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 type result struct {
@@ -37,27 +37,27 @@ func (a *applier) authorize(ctx context.Context) error {
 	return nil
 }
 
-func (a *applier) run(ctx context.Context, op protocol.Op) error {
-	payload, err := protocol.DecodePayload(op)
+func (a *applier) run(ctx context.Context, op boardcontent.Op) error {
+	payload, err := boardcontent.DecodePayload(op)
 	if err != nil {
 		return asRejection(err)
 	}
 	switch p := payload.(type) {
-	case *protocol.CardCreate:
+	case *boardcontent.CardCreate:
 		err = a.cardCreate(ctx, p)
-	case *protocol.CardEdit:
+	case *boardcontent.CardEdit:
 		err = a.cardEdit(ctx, p)
-	case *protocol.CardMove:
+	case *boardcontent.CardMove:
 		err = a.cardMove(ctx, p)
-	case *protocol.CardArchive:
+	case *boardcontent.CardArchive:
 		err = a.cardArchive(ctx, p)
-	case *protocol.ColumnCreate:
+	case *boardcontent.ColumnCreate:
 		err = a.columnCreate(ctx, p)
-	case *protocol.ColumnRename:
+	case *boardcontent.ColumnRename:
 		err = a.columnRename(ctx, p)
-	case *protocol.ColumnMove:
+	case *boardcontent.ColumnMove:
 		err = a.columnMove(ctx, p)
-	case *protocol.ColumnArchive:
+	case *boardcontent.ColumnArchive:
 		err = a.columnArchive(ctx, p)
 	default:
 		return invalid("unsupported operation type")
