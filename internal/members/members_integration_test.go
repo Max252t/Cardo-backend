@@ -61,14 +61,13 @@ func (r *recordingPublisher) types() []string {
 }
 
 type fixture struct {
-	store  *storage.Store
-	svc    *members.Service
-	clock  *fakeClock
-	pub    *recordingPublisher
-	owner  domain.User
-	board  domain.BoardWithRole
-	ctx    context.Context
-	emails map[uuid.UUID]string
+	store *storage.Store
+	svc   *members.Service
+	clock *fakeClock
+	pub   *recordingPublisher
+	owner domain.User
+	board domain.BoardWithRole
+	ctx   context.Context
 }
 
 func newFixture(t *testing.T) *fixture {
