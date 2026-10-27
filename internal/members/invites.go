@@ -60,11 +60,11 @@ func (s *Service) CreateInvite(ctx context.Context, actorID, boardID uuid.UUID, 
 		ExpiresAt: s.clock.Now().Add(ttl),
 		MaxUses:   clean.MaxUses,
 	}
-	err = s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
-		if _, err := btx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
-			return err
+	err = s.mutate(ctx, boardID, func(ctx context.Context, tx boardtx.AdminTx) (*domain.Event, error) {
+		if _, err := tx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
+			return nil, err
 		}
-		return btx.InsertInvite(ctx, inv)
+		return nil, tx.InsertInvite(ctx, inv)
 	})
 	if err != nil {
 		return domain.NewInvite{}, err
@@ -73,73 +73,57 @@ func (s *Service) CreateInvite(ctx context.Context, actorID, boardID uuid.UUID, 
 }
 
 func (s *Service) ListInvites(ctx context.Context, actorID, boardID uuid.UUID) ([]domain.Invite, error) {
-	var out []domain.Invite
-	err := s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
-		if _, err := btx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
-			return err
-		}
-		var err error
-		out, err = btx.ActiveInvites(ctx, s.clock.Now())
-		return err
-	})
-	return out, err
+	return s.store.ActiveInvites(ctx, boardID, actorID, s.clock.Now())
 }
 
 func (s *Service) RevokeInvite(ctx context.Context, actorID, boardID, inviteID uuid.UUID) error {
-	return s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
-		if _, err := btx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
-			return err
+	return s.mutate(ctx, boardID, func(ctx context.Context, tx boardtx.AdminTx) (*domain.Event, error) {
+		if _, err := tx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
+			return nil, err
 		}
-		return btx.RevokeInvite(ctx, inviteID, s.clock.Now())
+		return nil, tx.RevokeInvite(ctx, inviteID, s.clock.Now())
 	})
 }
 
 func (s *Service) Accept(ctx context.Context, userID uuid.UUID, token string) (domain.BoardWithRole, error) {
 	hash := HashToken(token)
-	boardID, err := s.store.BoardIDByInvite(ctx, hash)
+	boardID, err := s.store.ActiveBoardIDByInviteHash(ctx, hash)
 	if err != nil {
 		return domain.BoardWithRole{}, err
 	}
-	var (
-		result domain.BoardWithRole
-		ev     domain.Event
-		joined bool
-	)
-	err = s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
-		inv, err := btx.InviteByHash(ctx, hash)
+	var result domain.BoardWithRole
+	err = s.mutate(ctx, boardID, func(ctx context.Context, tx boardtx.AdminTx) (*domain.Event, error) {
+		inv, err := tx.InviteByHash(ctx, hash)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		existing, err := btx.MemberRole(ctx, userID)
+		existing, err := tx.MemberRole(ctx, userID)
 		if err == nil {
-			result = domain.BoardWithRole{Board: btx.Board(), Role: existing}
-			return nil
+			result = domain.BoardWithRole{Board: tx.Board(), Role: existing}
+			return nil, nil
 		}
 		if !errors.Is(err, domain.ErrNotFound) {
-			return err
+			return nil, err
 		}
 		if !inv.Usable(s.clock.Now()) {
-			return domain.ErrInviteUnavailable
+			return nil, domain.ErrInviteUnavailable
 		}
-		if err := btx.ConsumeInvite(ctx, inv.ID); err != nil {
-			return err
+		if err := tx.ConsumeInvite(ctx, inv.ID); err != nil {
+			return nil, err
 		}
-		member, err := btx.AddMember(ctx, userID, inv.Role)
+		member, err := tx.AddMember(ctx, userID, inv.Role)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if ev, err = appendEvent(ctx, btx, userID, boardcontent.EventMemberAdded, addedPayload(member, userID)); err != nil {
-			return err
+		ev, err := appendEvent(ctx, tx, userID, boardcontent.EventMemberAdded, addedPayload(member, userID))
+		if err != nil {
+			return nil, err
 		}
-		joined = true
-		result = domain.BoardWithRole{Board: btx.Board(), Role: member.Role}
-		return nil
+		result = domain.BoardWithRole{Board: tx.Board(), Role: member.Role}
+		return ev, nil
 	})
 	if err != nil {
 		return domain.BoardWithRole{}, err
-	}
-	if joined {
-		s.publish(ctx, ev)
 	}
 	return result, nil
 }

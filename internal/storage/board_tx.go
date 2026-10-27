@@ -19,9 +19,12 @@ type BoardTx struct {
 	board domain.Board
 }
 
-var _ boardtx.Tx = (*BoardTx)(nil)
+var (
+	_ boardtx.Tx      = (*BoardTx)(nil)
+	_ boardtx.AdminTx = (*BoardTx)(nil)
+)
 
-func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx.Func) error {
+func (s *Store) withLockedBoard(ctx context.Context, boardID uuid.UUID, fn func(ctx context.Context, btx *BoardTx) error) error {
 	err := s.InTx(ctx, func(tx pgx.Tx) error {
 		board, err := lockBoard(ctx, tx, boardID, s.lockTimeout)
 		if err != nil {
@@ -30,6 +33,18 @@ func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx
 		return fn(ctx, &BoardTx{tx: tx, board: board})
 	})
 	return lockTimeoutAsBusy(err)
+}
+
+func (s *Store) WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx.Func) error {
+	return s.withLockedBoard(ctx, boardID, func(ctx context.Context, btx *BoardTx) error {
+		return fn(ctx, btx)
+	})
+}
+
+func (s *Store) WithAdminLock(ctx context.Context, boardID uuid.UUID, fn boardtx.AdminFunc) error {
+	return s.withLockedBoard(ctx, boardID, func(ctx context.Context, btx *BoardTx) error {
+		return fn(ctx, btx)
+	})
 }
 
 func (b *BoardTx) Savepoint(ctx context.Context, fn boardtx.Func) error {

@@ -463,10 +463,9 @@ func TestOwnerRulesAcrossEveryEntryPoint(t *testing.T) {
 	require.ErrorIs(t, f.svc.Remove(f.ctx, viewer.ID, f.board.ID, f.owner.ID), domain.ErrForbidden)
 	for _, role := range []domain.Role{domain.RoleOwner, domain.RoleEditor, domain.RoleViewer} {
 		_, err := f.svc.ChangeRole(f.ctx, f.owner.ID, f.board.ID, f.owner.ID, role)
-		var vErr *domain.ValidationError
 		require.Error(t, err, role)
 		if role != domain.RoleOwner {
-			require.ErrorAs(t, err, &vErr, "the owner cannot be demoted to %s", role)
+			require.ErrorIs(t, err, domain.ErrForbidden, "the owner cannot be demoted to %s", role)
 		}
 	}
 	_, err := f.svc.ChangeRole(f.ctx, f.owner.ID, f.board.ID, editor.ID, domain.RoleOwner)

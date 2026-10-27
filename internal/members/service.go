@@ -2,11 +2,6 @@ package members
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -15,7 +10,9 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/boardtx"
+	"github.com/Max252t/Cardo-backend/internal/clock"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/secrets"
 )
 
 const (
@@ -28,26 +25,17 @@ const (
 )
 
 type Store interface {
-	WithBoardLock(ctx context.Context, boardID uuid.UUID, fn boardtx.Func) error
+	WithAdminLock(ctx context.Context, boardID uuid.UUID, fn boardtx.AdminFunc) error
 	BoardMembers(ctx context.Context, boardID, userID uuid.UUID) ([]domain.Member, error)
-	BoardIDByInvite(ctx context.Context, tokenHash string) (uuid.UUID, error)
-}
-
-type Clock interface {
-	Now() time.Time
-}
-
-type systemClock struct{}
-
-func (systemClock) Now() time.Time {
-	return time.Now()
+	ActiveInvites(ctx context.Context, boardID, userID uuid.UUID, now time.Time) ([]domain.Invite, error)
+	ActiveBoardIDByInviteHash(ctx context.Context, tokenHash string) (uuid.UUID, error)
 }
 
 type Service struct {
 	store     Store
 	publisher boardevents.Publisher
 	logger    *slog.Logger
-	clock     Clock
+	clock     clock.Clock
 	newID     func() (uuid.UUID, error)
 	newToken  func() (string, error)
 }
@@ -70,7 +58,7 @@ func WithLogger(l *slog.Logger) Option {
 	}
 }
 
-func WithClock(c Clock) Option {
+func WithClock(c clock.Clock) Option {
 	return func(s *Service) {
 		if c != nil {
 			s.clock = c
@@ -99,9 +87,9 @@ func NewService(store Store, opts ...Option) *Service {
 		store:     store,
 		publisher: boardevents.Nop{},
 		logger:    slog.New(slog.DiscardHandler),
-		clock:     systemClock{},
+		clock:     clock.System{},
 		newID:     uuid.NewV7,
-		newToken:  randomToken,
+		newToken:  secrets.Generator{Bytes: tokenBytes}.NewToken,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -109,17 +97,8 @@ func NewService(store Store, opts ...Option) *Service {
 	return s
 }
 
-func randomToken() (string, error) {
-	buf := make([]byte, tokenBytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate invite token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
 func HashToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
+	return secrets.Hash(token)
 }
 
 func (s *Service) List(ctx context.Context, userID, boardID uuid.UUID) ([]domain.Member, error) {
@@ -133,6 +112,13 @@ func validAssignableRole(role domain.Role) error {
 	return nil
 }
 
+func requireNotOwner(m domain.Member) error {
+	if m.Role == domain.RoleOwner {
+		return domain.ErrForbidden
+	}
+	return nil
+}
+
 func (s *Service) publish(ctx context.Context, ev domain.Event) {
 	boardevents.PublishDetached(ctx, s.publisher, s.logger, "publish member event failed", []domain.Event{ev},
 		slog.String("board_id", ev.BoardID.String()),
@@ -141,8 +127,30 @@ func (s *Service) publish(ctx context.Context, ev domain.Event) {
 	)
 }
 
-func appendEvent(ctx context.Context, btx boardtx.Tx, actorID uuid.UUID, eventType string, payload any) (domain.Event, error) {
-	return btx.AppendEvent(ctx, domain.EventDraft{Type: eventType, Payload: payload, ActorID: &actorID})
+type mutation func(ctx context.Context, tx boardtx.AdminTx) (*domain.Event, error)
+
+func (s *Service) mutate(ctx context.Context, boardID uuid.UUID, fn mutation) error {
+	var ev *domain.Event
+	err := s.store.WithAdminLock(ctx, boardID, func(ctx context.Context, tx boardtx.AdminTx) error {
+		var err error
+		ev, err = fn(ctx, tx)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if ev != nil {
+		s.publish(ctx, *ev)
+	}
+	return nil
+}
+
+func appendEvent(ctx context.Context, tx boardtx.Tx, actorID uuid.UUID, eventType string, payload any) (*domain.Event, error) {
+	ev, err := tx.AppendEvent(ctx, domain.EventDraft{Type: eventType, Payload: payload, ActorID: &actorID})
+	if err != nil {
+		return nil, err
+	}
+	return &ev, nil
 }
 
 func addedPayload(m domain.Member, actorID uuid.UUID) boardcontent.MemberAdded {
@@ -157,28 +165,23 @@ func (s *Service) Add(ctx context.Context, actorID, boardID uuid.UUID, email str
 	if err := validAssignableRole(role); err != nil {
 		return domain.Member{}, err
 	}
-	var (
-		member domain.Member
-		ev     domain.Event
-	)
-	err = s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
-		if _, err := btx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
-			return err
+	var member domain.Member
+	err = s.mutate(ctx, boardID, func(ctx context.Context, tx boardtx.AdminTx) (*domain.Event, error) {
+		if _, err := tx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
+			return nil, err
 		}
-		user, err := btx.UserByEmail(ctx, cleanEmail)
+		user, err := tx.UserByEmail(ctx, cleanEmail)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if member, err = btx.AddMember(ctx, user.ID, role); err != nil {
-			return err
+		if member, err = tx.AddMember(ctx, user.ID, role); err != nil {
+			return nil, err
 		}
-		ev, err = appendEvent(ctx, btx, actorID, boardcontent.EventMemberAdded, addedPayload(member, actorID))
-		return err
+		return appendEvent(ctx, tx, actorID, boardcontent.EventMemberAdded, addedPayload(member, actorID))
 	})
 	if err != nil {
 		return domain.Member{}, err
 	}
-	s.publish(ctx, ev)
 	return member, nil
 }
 
@@ -186,70 +189,54 @@ func (s *Service) ChangeRole(ctx context.Context, actorID, boardID, targetID uui
 	if err := validAssignableRole(role); err != nil {
 		return domain.Member{}, err
 	}
-	var (
-		member  domain.Member
-		ev      domain.Event
-		changed bool
-	)
-	err := s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
-		if _, err := btx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
-			return err
+	var member domain.Member
+	err := s.mutate(ctx, boardID, func(ctx context.Context, tx boardtx.AdminTx) (*domain.Event, error) {
+		if _, err := tx.RequireRole(ctx, actorID, domain.RoleOwner); err != nil {
+			return nil, err
 		}
-		current, err := btx.Member(ctx, targetID)
+		current, err := tx.Member(ctx, targetID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if current.Role == domain.RoleOwner {
-			return domain.NewValidationError("user_id", "the owner role cannot be changed")
+		if err := requireNotOwner(current); err != nil {
+			return nil, err
 		}
 		if current.Role == role {
 			member = current
-			return nil
+			return nil, nil
 		}
-		if member, err = btx.SetMemberRole(ctx, targetID, role); err != nil {
-			return err
+		if member, err = tx.SetMemberRole(ctx, targetID, role); err != nil {
+			return nil, err
 		}
-		changed = true
-		ev, err = appendEvent(ctx, btx, actorID, boardcontent.EventMemberRoleChanged,
+		return appendEvent(ctx, tx, actorID, boardcontent.EventMemberRoleChanged,
 			boardcontent.MemberRoleChanged{UserID: targetID, Role: role, ActorID: actorID})
-		return err
 	})
 	if err != nil {
 		return domain.Member{}, err
-	}
-	if changed {
-		s.publish(ctx, ev)
 	}
 	return member, nil
 }
 
 func (s *Service) Remove(ctx context.Context, actorID, boardID, targetID uuid.UUID) error {
-	var ev domain.Event
-	err := s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
-		actorRole, err := btx.MemberRole(ctx, actorID)
+	return s.mutate(ctx, boardID, func(ctx context.Context, tx boardtx.AdminTx) (*domain.Event, error) {
+		actorRole, err := tx.MemberRole(ctx, actorID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if actorID != targetID && !actorRole.AtLeast(domain.RoleOwner) {
-			return domain.ErrForbidden
+			return nil, domain.ErrForbidden
 		}
-		target, err := btx.Member(ctx, targetID)
+		target, err := tx.Member(ctx, targetID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if target.Role == domain.RoleOwner {
-			return domain.ErrForbidden
+		if err := requireNotOwner(target); err != nil {
+			return nil, err
 		}
-		if err := btx.RemoveMember(ctx, targetID); err != nil {
-			return err
+		if err := tx.RemoveMember(ctx, targetID); err != nil {
+			return nil, err
 		}
-		ev, err = appendEvent(ctx, btx, actorID, boardcontent.EventMemberRemoved,
+		return appendEvent(ctx, tx, actorID, boardcontent.EventMemberRemoved,
 			boardcontent.MemberRemoved{UserID: targetID, ActorID: actorID})
-		return err
 	})
-	if err != nil {
-		return err
-	}
-	s.publish(ctx, ev)
-	return nil
 }

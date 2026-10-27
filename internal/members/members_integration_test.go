@@ -136,7 +136,7 @@ func TestOwnerAddsChangesAndRemovesMembersWithEvents(t *testing.T) {
 	assert.Equal(t, domain.RoleEditor, m.Role)
 
 	_, err = f.svc.ChangeRole(f.ctx, f.owner.ID, f.board.ID, f.owner.ID, domain.RoleViewer)
-	require.ErrorAs(t, err, &vErr)
+	require.ErrorIs(t, err, domain.ErrForbidden)
 	_, err = f.svc.ChangeRole(f.ctx, f.owner.ID, f.board.ID, uuid.New(), domain.RoleViewer)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 

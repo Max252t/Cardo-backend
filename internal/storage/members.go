@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -34,10 +35,25 @@ func (s *Store) BoardMembers(ctx context.Context, boardID, userID uuid.UUID) ([]
 		boardID)
 }
 
-func (s *Store) BoardIDByInvite(ctx context.Context, tokenHash string) (uuid.UUID, error) {
+func (s *Store) ActiveBoardIDByInviteHash(ctx context.Context, tokenHash string) (uuid.UUID, error) {
 	id, err := scanUUID(s.pool.QueryRow(ctx,
 		`SELECT i.board_id FROM invites i JOIN boards b ON b.id = i.board_id
 		 WHERE i.token_hash = $1 AND b.deleted_at IS NULL`,
 		tokenHash))
 	return id, noRowsAsNotFound(err)
+}
+
+func (s *Store) ActiveInvites(ctx context.Context, boardID, userID uuid.UUID, now time.Time) ([]domain.Invite, error) {
+	member, err := s.BoardMember(ctx, boardID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if member.Role != domain.RoleOwner {
+		return nil, domain.ErrForbidden
+	}
+	return queryAll(ctx, s.pool, scanInvite,
+		`SELECT `+inviteColumns+` FROM invites
+		 WHERE board_id = $1 AND revoked_at IS NULL AND expires_at > $2 AND uses < max_uses
+		 ORDER BY expires_at, id`,
+		boardID, now)
 }

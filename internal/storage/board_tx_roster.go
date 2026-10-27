@@ -89,14 +89,6 @@ func (b *BoardTx) InviteByHash(ctx context.Context, tokenHash string) (domain.In
 	return inv, noRowsAsNotFound(err)
 }
 
-func (b *BoardTx) ActiveInvites(ctx context.Context, now time.Time) ([]domain.Invite, error) {
-	return queryAll(ctx, b.tx, scanInvite,
-		`SELECT `+inviteColumns+` FROM invites
-		 WHERE board_id = $1 AND revoked_at IS NULL AND expires_at > $2 AND uses < max_uses
-		 ORDER BY expires_at, id`,
-		b.board.ID, now)
-}
-
 func (b *BoardTx) RevokeInvite(ctx context.Context, id uuid.UUID, at time.Time) error {
 	tag, err := b.tx.Exec(ctx,
 		`UPDATE invites SET revoked_at = COALESCE(revoked_at, $3) WHERE id = $1 AND board_id = $2`,

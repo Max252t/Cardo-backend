@@ -37,7 +37,7 @@ func TestMemberAndInviteEndpointsEndToEnd(t *testing.T) {
 
 	changed := f.mustJSON(t, http.MethodPatch, base+"/members/"+bob.userID, `{"role":"editor"}`, owner.access, http.StatusOK)
 	assert.Equal(t, "editor", changed["role"])
-	f.expectError(t, http.MethodPatch, base+"/members/"+owner.userID, `{"role":"viewer"}`, owner.access, http.StatusBadRequest, httpapi.CodeValidation)
+	f.expectError(t, http.MethodPatch, base+"/members/"+owner.userID, `{"role":"viewer"}`, owner.access, http.StatusForbidden, httpapi.CodeForbidden)
 	f.expectError(t, http.MethodPatch, base+"/members/"+bob.userID, `{"role":"viewer"}`, bob.access, http.StatusForbidden, httpapi.CodeForbidden)
 	f.expectError(t, http.MethodPatch, base+"/members/not-a-uuid", `{"role":"viewer"}`, owner.access, http.StatusBadRequest, httpapi.CodeValidation)
 

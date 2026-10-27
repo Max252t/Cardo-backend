@@ -16,8 +16,6 @@ type Tx interface {
 	Savepoint(ctx context.Context, fn Func) error
 	BoardSettings
 	Members
-	Roster
-	Invites
 	Events
 	ProcessedOps
 	Columns
@@ -77,7 +75,14 @@ type Roster interface {
 type Invites interface {
 	InsertInvite(ctx context.Context, inv domain.Invite) error
 	InviteByHash(ctx context.Context, tokenHash string) (domain.Invite, error)
-	ActiveInvites(ctx context.Context, now time.Time) ([]domain.Invite, error)
 	RevokeInvite(ctx context.Context, id uuid.UUID, at time.Time) error
 	ConsumeInvite(ctx context.Context, id uuid.UUID) error
 }
+
+type AdminTx interface {
+	Tx
+	Roster
+	Invites
+}
+
+type AdminFunc func(ctx context.Context, tx AdminTx) error
