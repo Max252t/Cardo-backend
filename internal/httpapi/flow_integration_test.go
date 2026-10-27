@@ -106,7 +106,7 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 		Users:     users.NewService(store),
 		Boards:    boards.NewService(store),
 		Members:   members.NewService(store),
-		Logger:    slog.New(slog.NewJSONHandler(logs, nil)),
+		Logger:    slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Readiness: readiness,
 	})
 	require.NoError(t, err)
