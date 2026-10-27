@@ -452,7 +452,6 @@ func TestAcceptReturnsTheBoardWithTheRoleOfTheMember(t *testing.T) {
 }
 
 func TestInviteTTLThatOverflowsDurationIsRejected(t *testing.T) {
-	t.Skip("BUG: expires_in is converted with time.Duration(seconds)*time.Second without a range check, so values that overflow int64 nanoseconds bypass the 30 day limit and produce a wrapped lifetime (for example 18446744074 gives a ~0.3s invite, 18446830474 a ~1 day invite and -9223372036854775808 the 7 day default)")
 	f := newBoardFlow(t)
 	owner := f.register(t, "owner")
 	board := f.mustJSON(t, http.MethodPost, "/api/boards", `{"title":"Overflow"}`, owner.access, http.StatusCreated)

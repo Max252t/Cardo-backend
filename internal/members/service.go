@@ -21,6 +21,7 @@ import (
 const (
 	DefaultInviteTTL     = 7 * 24 * time.Hour
 	MaxInviteTTL         = 30 * 24 * time.Hour
+	MaxInviteTTLSeconds  = int64(MaxInviteTTL / time.Second)
 	DefaultInviteMaxUses = 1
 	MaxInviteMaxUses     = 100
 	tokenBytes           = 32

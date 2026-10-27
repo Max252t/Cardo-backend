@@ -225,7 +225,7 @@ func TestInviteRevokeExpiryAndMultipleUses(t *testing.T) {
 	f := newFixture(t)
 	ann, bob, carol, dave := f.user(t, "ann"), f.user(t, "bob"), f.user(t, "carol"), f.user(t, "dave")
 
-	multi, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, MaxUses: 2, ExpiresIn: time.Hour})
+	multi, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, MaxUses: 2, ExpiresIn: 3600})
 	require.NoError(t, err)
 	_, err = f.svc.Accept(f.ctx, ann.ID, multi.Token)
 	require.NoError(t, err)
@@ -234,7 +234,7 @@ func TestInviteRevokeExpiryAndMultipleUses(t *testing.T) {
 	_, err = f.svc.Accept(f.ctx, carol.ID, multi.Token)
 	require.ErrorIs(t, err, domain.ErrInviteUnavailable)
 
-	expiring, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: time.Hour})
+	expiring, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: 3600})
 	require.NoError(t, err)
 	f.clock.Advance(2 * time.Hour)
 	_, err = f.svc.Accept(f.ctx, carol.ID, expiring.Token)
@@ -264,8 +264,10 @@ func TestInviteInputLimits(t *testing.T) {
 	for _, in := range []members.InviteInput{
 		{Role: domain.RoleOwner},
 		{Role: domain.Role("admin")},
-		{Role: domain.RoleViewer, ExpiresIn: members.MaxInviteTTL + time.Second},
-		{Role: domain.RoleViewer, ExpiresIn: -time.Second},
+		{Role: domain.RoleViewer, ExpiresIn: members.MaxInviteTTLSeconds + 1},
+		{Role: domain.RoleViewer, ExpiresIn: -1},
+		{Role: domain.RoleViewer, ExpiresIn: 9223372036854775807},
+		{Role: domain.RoleViewer, ExpiresIn: -9223372036854775808},
 		{Role: domain.RoleViewer, MaxUses: members.MaxInviteMaxUses + 1},
 		{Role: domain.RoleViewer, MaxUses: -1},
 	} {

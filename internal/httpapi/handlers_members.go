@@ -31,18 +31,18 @@ type MemberService interface {
 }
 
 type addMemberRequest struct {
-	Email string      `json:"email"`
-	Role  domain.Role `json:"role"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
 }
 
 type changeRoleRequest struct {
-	Role domain.Role `json:"role"`
+	Role string `json:"role"`
 }
 
 type createInviteRequest struct {
-	Role      domain.Role `json:"role"`
-	ExpiresIn int64       `json:"expires_in"`
-	MaxUses   int         `json:"max_uses"`
+	Role      string `json:"role"`
+	ExpiresIn int64  `json:"expires_in"`
+	MaxUses   int    `json:"max_uses"`
 }
 
 type memberListResponse struct {
@@ -105,7 +105,7 @@ func (h *handlers) addMember(c *gin.Context) {
 	if !h.bindJSON(c, &req) {
 		return
 	}
-	m, err := h.members.Add(c, currentUserID(c), boardID, req.Email, req.Role)
+	m, err := h.members.Add(c, currentUserID(c), boardID, req.Email, domain.Role(req.Role))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -126,7 +126,7 @@ func (h *handlers) changeMemberRole(c *gin.Context) {
 	if !h.bindJSON(c, &req) {
 		return
 	}
-	m, err := h.members.ChangeRole(c, currentUserID(c), boardID, targetID, req.Role)
+	m, err := h.members.ChangeRole(c, currentUserID(c), boardID, targetID, domain.Role(req.Role))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -160,8 +160,8 @@ func (h *handlers) createInvite(c *gin.Context) {
 		return
 	}
 	created, err := h.members.CreateInvite(c, currentUserID(c), boardID, members.InviteInput{
-		Role:      req.Role,
-		ExpiresIn: time.Duration(req.ExpiresIn) * time.Second,
+		Role:      domain.Role(req.Role),
+		ExpiresIn: req.ExpiresIn,
 		MaxUses:   req.MaxUses,
 	})
 	if err != nil {

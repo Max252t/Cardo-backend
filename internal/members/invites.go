@@ -14,31 +14,32 @@ import (
 
 type InviteInput struct {
 	Role      domain.Role
-	ExpiresIn time.Duration
+	ExpiresIn int64
 	MaxUses   int
 }
 
-func (in InviteInput) normalize() (InviteInput, error) {
+func (in InviteInput) normalize() (InviteInput, time.Duration, error) {
 	if err := validAssignableRole(in.Role); err != nil {
-		return in, err
+		return in, 0, err
 	}
-	if in.ExpiresIn == 0 {
-		in.ExpiresIn = DefaultInviteTTL
-	}
-	if in.ExpiresIn < 0 || in.ExpiresIn > MaxInviteTTL {
-		return in, domain.NewValidationError("expires_in", "must be positive and at most 30 days")
+	ttl := DefaultInviteTTL
+	if in.ExpiresIn != 0 {
+		if in.ExpiresIn < 1 || in.ExpiresIn > MaxInviteTTLSeconds {
+			return in, 0, domain.NewValidationError("expires_in", "must be between 1 and 2592000 seconds")
+		}
+		ttl = time.Duration(in.ExpiresIn) * time.Second
 	}
 	if in.MaxUses == 0 {
 		in.MaxUses = DefaultInviteMaxUses
 	}
 	if in.MaxUses < 0 || in.MaxUses > MaxInviteMaxUses {
-		return in, domain.NewValidationError("max_uses", "must be between 1 and 100")
+		return in, 0, domain.NewValidationError("max_uses", "must be between 1 and 100")
 	}
-	return in, nil
+	return in, ttl, nil
 }
 
 func (s *Service) CreateInvite(ctx context.Context, actorID, boardID uuid.UUID, in InviteInput) (domain.NewInvite, error) {
-	clean, err := in.normalize()
+	clean, ttl, err := in.normalize()
 	if err != nil {
 		return domain.NewInvite{}, err
 	}
@@ -56,7 +57,7 @@ func (s *Service) CreateInvite(ctx context.Context, actorID, boardID uuid.UUID, 
 		TokenHash: HashToken(token),
 		Role:      clean.Role,
 		CreatedBy: actorID,
-		ExpiresAt: s.clock.Now().Add(clean.ExpiresIn),
+		ExpiresAt: s.clock.Now().Add(ttl),
 		MaxUses:   clean.MaxUses,
 	}
 	err = s.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {

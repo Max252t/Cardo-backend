@@ -127,9 +127,9 @@ func TestInviteGeneratorsAreInjectableAndTheirFailuresAbortCreation(t *testing.T
 func TestInviteExpiryBoundaryFollowsTheClock(t *testing.T) {
 	f := newFixture(t)
 	f.pinClock()
-	justBefore, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: time.Hour})
+	justBefore, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: 3600})
 	require.NoError(t, err)
-	atExpiry, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: time.Hour})
+	atExpiry, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: 3600})
 	require.NoError(t, err)
 	assert.Equal(t, f.clock.Now().Add(time.Hour), justBefore.ExpiresAt)
 	ann, bob := f.user(t, "ann"), f.user(t, "bob")
@@ -149,9 +149,9 @@ func TestInviteExpiryBoundaryFollowsTheClock(t *testing.T) {
 
 func TestExpiredInvitesDisappearFromTheActiveList(t *testing.T) {
 	f := newFixture(t)
-	short, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: time.Hour})
+	short, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, ExpiresIn: 3600})
 	require.NoError(t, err)
-	long, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleEditor, ExpiresIn: 48 * time.Hour})
+	long, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleEditor, ExpiresIn: 172800})
 	require.NoError(t, err)
 
 	active, err := f.svc.ListInvites(f.ctx, f.owner.ID, f.board.ID)
@@ -300,7 +300,7 @@ func TestAcceptByExistingMembersNeverChangesTheirRoleOrConsumesAUse(t *testing.T
 func TestMemberCanReuseARevokedOrExpiredInviteIdempotently(t *testing.T) {
 	f := newFixture(t)
 	bob := f.user(t, "bob")
-	created, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, MaxUses: 2, ExpiresIn: time.Hour})
+	created, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, members.InviteInput{Role: domain.RoleViewer, MaxUses: 2, ExpiresIn: 3600})
 	require.NoError(t, err)
 	_, err = f.svc.Accept(f.ctx, bob.ID, created.Token)
 	require.NoError(t, err)
@@ -417,9 +417,8 @@ func TestInviteLimitBoundariesAndDefaults(t *testing.T) {
 	accepted := []members.InviteInput{
 		{Role: domain.RoleViewer, MaxUses: 1},
 		{Role: domain.RoleEditor, MaxUses: members.MaxInviteMaxUses},
-		{Role: domain.RoleViewer, ExpiresIn: members.MaxInviteTTL},
-		{Role: domain.RoleViewer, ExpiresIn: time.Second},
-		{Role: domain.RoleViewer, ExpiresIn: time.Nanosecond},
+		{Role: domain.RoleViewer, ExpiresIn: members.MaxInviteTTLSeconds},
+		{Role: domain.RoleViewer, ExpiresIn: 1},
 	}
 	for _, in := range accepted {
 		created, err := f.svc.CreateInvite(f.ctx, f.owner.ID, f.board.ID, in)
@@ -432,8 +431,8 @@ func TestInviteLimitBoundariesAndDefaults(t *testing.T) {
 	assert.Equal(t, 100, members.MaxInviteMaxUses)
 
 	rejected := []members.InviteInput{
-		{Role: domain.RoleViewer, ExpiresIn: members.MaxInviteTTL + time.Nanosecond},
-		{Role: domain.RoleViewer, ExpiresIn: -time.Nanosecond},
+		{Role: domain.RoleViewer, ExpiresIn: members.MaxInviteTTLSeconds + 1},
+		{Role: domain.RoleViewer, ExpiresIn: -1},
 		{Role: domain.RoleViewer, MaxUses: members.MaxInviteMaxUses + 1},
 		{Role: domain.RoleViewer, MaxUses: -1},
 		{Role: domain.RoleOwner},
