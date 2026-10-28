@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -104,6 +105,10 @@ func (h *Hub) unsubscribe(c *Client) {
 	ctx, cancel := h.busContext()
 	defer cancel()
 	if err := h.bus.Unsubscribe(ctx, protocol.BoardChannel(c.boardID), protocol.PresenceChannel(c.boardID)); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			h.logger.Debug("unsubscribe board channels timed out", c.logAttrs(slog.Any("error", err))...)
+			return
+		}
 		h.logger.Warn("unsubscribe board channels failed", c.logAttrs(slog.Any("error", err))...)
 	}
 }

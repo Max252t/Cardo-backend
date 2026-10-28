@@ -26,6 +26,7 @@ type Deps struct {
 	Tokens   TokenParser
 	Clock    Clock
 	Logger   *slog.Logger
+	Metrics  Metrics
 }
 
 type HubOption func(*Hub)
@@ -55,6 +56,7 @@ type Hub struct {
 	tokens   TokenParser
 	clock    Clock
 	logger   *slog.Logger
+	metrics  Metrics
 	cfg      Config
 	hooks    map[string][]EventHook
 
@@ -78,6 +80,9 @@ func NewHub(deps Deps, cfg Config, opts ...HubOption) (*Hub, error) {
 	if deps.Logger == nil {
 		deps.Logger = slog.New(slog.DiscardHandler)
 	}
+	if deps.Metrics == nil {
+		deps.Metrics = nopMetrics{}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &Hub{
 		bus:        deps.Bus,
@@ -88,6 +93,7 @@ func NewHub(deps Deps, cfg Config, opts ...HubOption) (*Hub, error) {
 		tokens:     deps.Tokens,
 		clock:      deps.Clock,
 		logger:     deps.Logger,
+		metrics:    deps.Metrics,
 		cfg:        cfg.withDefaults(),
 		hooks:      defaultHooks(),
 		baseCtx:    ctx,

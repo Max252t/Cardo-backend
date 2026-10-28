@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -22,6 +23,7 @@ type Processor struct {
 	store     Store
 	publisher boardevents.Publisher
 	logger    *slog.Logger
+	metrics   Metrics
 }
 
 type Option func(*Processor)
@@ -47,6 +49,7 @@ func NewProcessor(store Store, opts ...Option) *Processor {
 		store:     store,
 		publisher: boardevents.Nop{},
 		logger:    slog.New(slog.DiscardHandler),
+		metrics:   nopMetrics{},
 	}
 	for _, opt := range opts {
 		opt(p)
@@ -56,8 +59,20 @@ func NewProcessor(store Store, opts ...Option) *Processor {
 
 func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {
 	if op.OpID == uuid.Nil {
+		p.metrics.ObserveOp(metricType(op.Type), boardcontent.ReasonValidation, 0)
 		return boardcontent.OpOutcome{}, domain.NewValidationError("op_id", "is required")
 	}
+	start := time.Now()
+	out, err := p.apply(ctx, userID, boardID, op)
+	p.metrics.ObserveOp(metricType(op.Type), metricResult(out, err), time.Since(start))
+	if err != nil {
+		return boardcontent.OpOutcome{}, err
+	}
+	p.publish(ctx, boardID, op, out)
+	return out, nil
+}
+
+func (p *Processor) apply(ctx context.Context, userID, boardID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {
 	var out boardcontent.OpOutcome
 	err := p.store.WithBoardLock(ctx, boardID, func(ctx context.Context, btx boardtx.Tx) error {
 		var err error
@@ -67,15 +82,19 @@ func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op boa
 	if err != nil {
 		return boardcontent.OpOutcome{}, err
 	}
-	if out.Event != nil && !out.Replayed {
-		events := out.Events()
-		boardevents.PublishDetached(ctx, p.publisher, p.logger, "publish board events failed", events,
-			slog.String("board_id", boardID.String()),
-			slog.String("op_id", op.OpID.String()),
-			slog.Int64("seq", events[0].Seq),
-		)
-	}
 	return out, nil
+}
+
+func (p *Processor) publish(ctx context.Context, boardID uuid.UUID, op boardcontent.Op, out boardcontent.OpOutcome) {
+	if out.Event == nil || out.Replayed {
+		return
+	}
+	events := out.Events()
+	boardevents.PublishDetached(ctx, p.publisher, p.logger, "publish board events failed", events,
+		slog.String("board_id", boardID.String()),
+		slog.String("op_id", op.OpID.String()),
+		slog.Int64("seq", events[0].Seq),
+	)
 }
 
 func applyLocked(ctx context.Context, btx boardtx.Tx, userID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {

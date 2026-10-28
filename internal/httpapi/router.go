@@ -68,6 +68,7 @@ type Deps struct {
 	Claims         ClaimsParser
 	Sockets        BoardSockets
 	Members        MemberService
+	Metrics        Metrics
 }
 
 type handlers struct {
@@ -107,11 +108,13 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
 	r.ContextWithFallback = true
 	if err := r.SetTrustedProxies(d.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("httpapi: trusted proxies: %w", err)
 	}
-	r.Use(requestIDMiddleware(), h.logMiddleware(), h.recoveryMiddleware(), bodyLimitMiddleware(d.MaxBodyBytes))
+	r.Use(requestIDMiddleware(), metricsMiddleware(d.Metrics), h.logMiddleware(), h.recoveryMiddleware(), bodyLimitMiddleware(d.MaxBodyBytes))
 	r.NoRoute(func(c *gin.Context) {
 		abortWithError(c, http.StatusNotFound, CodeNotFound, "route not found")
 	})
@@ -125,6 +128,9 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 func withDefaults(d Deps) Deps {
 	if d.Logger == nil {
 		d.Logger = slog.New(slog.DiscardHandler)
+	}
+	if d.Metrics == nil {
+		d.Metrics = nopMetrics{}
 	}
 	if d.MaxBodyBytes <= 0 {
 		d.MaxBodyBytes = defaultMaxBodyBytes

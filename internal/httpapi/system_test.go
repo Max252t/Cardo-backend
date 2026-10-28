@@ -1,14 +1,18 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -286,4 +290,59 @@ func TestReadyzReportsShutdownBeforeChecks(t *testing.T) {
 
 	rec = e.do(t, request{method: http.MethodGet, path: "/healthz"})
 	assert.Equal(t, http.StatusOK, rec.Code, "liveness stays green while draining")
+}
+
+type requestRecorder struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *requestRecorder) ObserveRequest(method, route string, status int, _ time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, fmt.Sprintf("%s %s %d", method, route, status))
+}
+
+func TestMetricsMiddlewareUsesRouteTemplates(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	rec := &requestRecorder{}
+	r, err := httpapi.NewRouter(httpapi.Deps{
+		Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards,
+		Metrics: rec,
+	})
+	require.NoError(t, err)
+	for _, path := range []string{"/healthz", "/api/boards/not-a-uuid/events", "/nowhere/secret-token"} {
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
+	}
+
+	assert.Equal(t, []string{
+		"GET /healthz 200",
+		"GET /api/boards/:id/events 401",
+		"GET unmatched 404",
+	}, rec.seen)
+}
+
+func TestHealthEndpointsLogAtDebugEvenWhenDraining(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.shuttingDown = func() bool { return true }
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	r, err := httpapi.NewRouter(httpapi.Deps{
+		Logger: logger, Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards,
+		ShuttingDown: e.shuttingDown,
+	})
+	require.NoError(t, err)
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
+	}
+
+	assert.Empty(t, buf.String())
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nowhere", nil))
+	assert.Contains(t, buf.String(), `"route":"unmatched"`)
 }

@@ -54,11 +54,14 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, boardID uuid.UUID, m
 	}
 	c := newClient(h, conn, boardID, member, tokenExpiresAt)
 	if err := h.join(c); err != nil {
-		writeCloseFrame(conn, closeCodeFor(err), "unavailable", h.cfg.WriteWait)
+		code := closeCodeFor(err)
+		h.metrics.ConnectionRefused(code)
+		writeCloseFrame(conn, code, "unavailable", h.cfg.WriteWait)
 		c.cancel()
 		_ = conn.Close()
 		return err
 	}
+	h.metrics.ConnectionOpened()
 	go c.run()
 	return nil
 }

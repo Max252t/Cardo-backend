@@ -59,6 +59,7 @@ func TestLoadFromDefaults(t *testing.T) {
 	assert.Equal(t, 5, cfg.LoginMaxFailures)
 	assert.Equal(t, time.Minute, cfg.LoginFailureWindow)
 	assert.Empty(t, cfg.WSAllowedOrigins)
+	assert.Empty(t, cfg.MetricsAddr)
 	assert.Equal(t, slog.LevelInfo, cfg.LogLevel)
 }
 
@@ -270,4 +271,54 @@ func TestLoadFromRejectsInvalidSingleInstanceFlag(t *testing.T) {
 	_, err := config.LoadFrom(env(baseEnv(map[string]string{"SINGLE_INSTANCE": "maybe"})))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SINGLE_INSTANCE")
+}
+
+func TestLoadFromMetricsAddr(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{"", ""},
+		{"   ", ""},
+		{":9091", ":9091"},
+		{"0.0.0.0:9091", "0.0.0.0:9091"},
+		{" 127.0.0.1:9100 ", "127.0.0.1:9100"},
+		{"[::1]:9091", "[::1]:9091"},
+	}
+	for _, tt := range tests {
+		t.Run("value "+tt.raw, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ADDR": tt.raw})))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.MetricsAddr)
+		})
+	}
+}
+
+func TestLoadFromRejectsInvalidMetricsAddr(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"9091", "localhost", ":0", ":70000", ":abc", "host:", "a:b:c"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			_, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ADDR": raw})))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "METRICS_ADDR")
+		})
+	}
+}
+
+func TestLoadFromRejectsMetricsAddrEqualToHTTPAddr(t *testing.T) {
+	t.Parallel()
+	_, err := config.LoadFrom(env(baseEnv(map[string]string{"HTTP_ADDR": ":8080", "METRICS_ADDR": ":8080"})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "METRICS_ADDR must differ from HTTP_ADDR")
+}
+
+func TestLoadFromMetricsAddrIsIndependentFromSingleInstance(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ADDR": ":9091", "SINGLE_INSTANCE": "true", "REDIS_URL": ""})))
+	require.NoError(t, err)
+	assert.Equal(t, ":9091", cfg.MetricsAddr)
+	assert.True(t, cfg.SingleInstance)
 }

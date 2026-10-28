@@ -42,16 +42,13 @@ func (h *handlers) logMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		route := c.FullPath()
-		if route == "" {
-			route = "unmatched"
-		}
-		level := slog.LevelInfo
-		if route == "/healthz" || route == "/readyz" {
-			level = slog.LevelDebug
-		}
+		route := routeLabel(c)
 		status := c.Writer.Status()
-		if status >= http.StatusInternalServerError {
+		level := slog.LevelInfo
+		switch {
+		case route == "/healthz" || route == "/readyz":
+			level = slog.LevelDebug
+		case status >= http.StatusInternalServerError:
 			level = slog.LevelError
 		}
 		attrs := []slog.Attr{

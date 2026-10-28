@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -50,6 +51,8 @@ type Config struct {
 
 	WSAllowedOrigins []string
 
+	MetricsAddr string
+
 	LogLevel slog.Level
 }
 
@@ -86,6 +89,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		HashMaxConcurrent:  p.integer("ARGON2_MAX_CONCURRENT", 0),
 		HashAcquireTimeout: p.duration("ARGON2_ACQUIRE_TIMEOUT", 2*time.Second),
 		WSAllowedOrigins:   p.list("WS_ALLOWED_ORIGINS"),
+		MetricsAddr:        p.str("METRICS_ADDR", ""),
 		LogLevel:           p.level("LOG_LEVEL", slog.LevelInfo),
 	}
 	if len(p.errs) > 0 {
@@ -142,6 +146,7 @@ func (c Config) validate() error {
 		errs = append(errs, errors.New("ARGON2_ACQUIRE_TIMEOUT must be positive"))
 	}
 	errs = append(errs, c.validateRedis()...)
+	errs = append(errs, c.validateMetricsAddr()...)
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
 	}
@@ -250,6 +255,23 @@ func (p *parser) level(key string, def slog.Level) slog.Level {
 func (c Config) validateRedis() []error {
 	if !c.SingleInstance && c.RedisURL == "" {
 		return []error{errors.New("REDIS_URL is required unless SINGLE_INSTANCE=true")}
+	}
+	return nil
+}
+
+func (c Config) validateMetricsAddr() []error {
+	if c.MetricsAddr == "" {
+		return nil
+	}
+	_, port, err := net.SplitHostPort(c.MetricsAddr)
+	if err != nil {
+		return []error{fmt.Errorf("METRICS_ADDR: invalid address %q", c.MetricsAddr)}
+	}
+	if n, convErr := strconv.Atoi(port); convErr != nil || n < 1 || n > 65535 {
+		return []error{fmt.Errorf("METRICS_ADDR: invalid port %q", port)}
+	}
+	if c.MetricsAddr == c.HTTPAddr {
+		return []error{errors.New("METRICS_ADDR must differ from HTTP_ADDR")}
 	}
 	return nil
 }
