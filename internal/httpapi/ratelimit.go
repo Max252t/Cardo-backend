@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -34,7 +35,9 @@ func (h *handlers) rateLimitMiddleware() gin.HandlerFunc {
 		}
 		allowed, retryAfter, err := h.limiter.Allow(c.Request.Context(), userID.String())
 		if err != nil {
-			h.limiterFailed(c, err)
+			if !errors.Is(err, context.Canceled) {
+				h.limiterFailed(c, err)
+			}
 			c.Next()
 			return
 		}
@@ -46,7 +49,7 @@ func (h *handlers) rateLimitMiddleware() gin.HandlerFunc {
 		abortWithAPIError(c, apiError{
 			status:     http.StatusTooManyRequests,
 			code:       CodeRateLimited,
-			message:    "too many requests, slow down",
+			message:    "too many requests, try again later",
 			retryAfter: retryAfterSeconds(max(retryAfter, time.Nanosecond)),
 		})
 	}

@@ -20,9 +20,9 @@ func TestRedisRESTLimiterBucketIsSharedBetweenReplicas(t *testing.T) {
 	clientA := testutil.NewRedis(t)
 	clientB := testutil.NewRedis(t)
 	user := uuid.NewString()
-	replicaA, err := ratelimit.NewRedisRESTLimiter(clientA, 0.0001, 4)
+	replicaA, err := ratelimit.NewRedisRESTLimiter(clientA, 0.001, 4)
 	require.NoError(t, err)
-	replicaB, err := ratelimit.NewRedisRESTLimiter(clientB, 0.0001, 4)
+	replicaB, err := ratelimit.NewRedisRESTLimiter(clientB, 0.001, 4)
 	require.NoError(t, err)
 
 	for range 2 {
@@ -42,7 +42,7 @@ func TestRedisRESTLimiterConcurrentReplicasAllowExactlyBurst(t *testing.T) {
 	const burst = 30
 	limiters := make([]*ratelimit.RedisRESTLimiter, 3)
 	for i := range limiters {
-		l, err := ratelimit.NewRedisRESTLimiter(testutil.NewRedis(t), 0.0001, burst)
+		l, err := ratelimit.NewRedisRESTLimiter(testutil.NewRedis(t), 0.001, burst, ratelimit.WithRedisTimeout(5*time.Second))
 		require.NoError(t, err)
 		limiters[i] = l
 	}
@@ -123,7 +123,7 @@ func TestRedisRESTLimiterKeysAreNamespaced(t *testing.T) {
 func TestRedisRESTLimiterBurstIsHonouredAfterIdleRefill(t *testing.T) {
 	client := testutil.NewRedis(t)
 	user := uuid.NewString()
-	l, err := ratelimit.NewRedisRESTLimiter(client, 50, 3)
+	l, err := ratelimit.NewRedisRESTLimiter(client, 5, 3)
 	require.NoError(t, err)
 
 	for range 3 {
@@ -133,7 +133,7 @@ func TestRedisRESTLimiterBurstIsHonouredAfterIdleRefill(t *testing.T) {
 	ok, _ := allow(t, l, user)
 	require.False(t, ok)
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(700 * time.Millisecond)
 	for i := range 3 {
 		ok, _ := allow(t, l, user)
 		assert.True(t, ok, "request %d after refill", i+1)
@@ -183,23 +183,31 @@ func TestRedisRESTLimiterIgnoresNonPositiveTimeoutOption(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestRedisRESTLimiterRejectsInvalidRatesButAcceptsExtremes(t *testing.T) {
+func TestRedisRESTLimiterAcceptsTheBoundsAndRejectsBeyondThem(t *testing.T) {
 	client := testutil.NewRedis(t)
-	_, err := ratelimit.NewRedisRESTLimiter(client, 1e12, 1)
-	assert.NoError(t, err)
-	l, err := ratelimit.NewRedisRESTLimiter(client, 1e12, 1)
+	fast, err := ratelimit.NewRedisRESTLimiter(client, ratelimit.MaxRate, ratelimit.MaxBurst)
 	require.NoError(t, err)
-	ok, _ := allow(t, l, uuid.NewString())
+	ok, _ := allow(t, fast, uuid.NewString())
 	assert.True(t, ok)
 
-	slow, err := ratelimit.NewRedisRESTLimiter(client, 0.00001, 1)
+	slow, err := ratelimit.NewRedisRESTLimiter(client, ratelimit.MinRate, 1)
 	require.NoError(t, err)
 	user := uuid.NewString()
 	ok, _ = allow(t, slow, user)
 	require.True(t, ok)
 	ok, retry := allow(t, slow, user)
 	assert.False(t, ok)
-	assert.Greater(t, retry, time.Hour)
+	assert.Greater(t, retry, 900*time.Second)
+
+	for _, tc := range []struct {
+		rate  float64
+		burst int
+	}{{ratelimit.MaxRate * 2, 1}, {ratelimit.MinRate / 2, 1}, {1, ratelimit.MaxBurst + 1}} {
+		_, err := ratelimit.NewRedisRESTLimiter(client, tc.rate, tc.burst)
+		assert.Error(t, err)
+		_, err = ratelimit.NewMemoryRESTLimiter(tc.rate, tc.burst, nil)
+		assert.Error(t, err)
+	}
 }
 
 func TestMemoryRESTLimiterKeepsActiveUsersWhenSweeping(t *testing.T) {
@@ -257,7 +265,7 @@ func TestMemoryRESTLimiterFractionalRateRetryAfter(t *testing.T) {
 
 func TestMemoryRESTLimiterManyKeysAreIndependent(t *testing.T) {
 	t.Parallel()
-	l, err := ratelimit.NewMemoryRESTLimiter(0.0001, 1, newFakeClock())
+	l, err := ratelimit.NewMemoryRESTLimiter(0.001, 1, newFakeClock())
 	require.NoError(t, err)
 	for range 500 {
 		ok, _ := allow(t, l, uuid.NewString())

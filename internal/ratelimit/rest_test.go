@@ -128,7 +128,7 @@ func TestMemoryRESTLimiterRejectsInvalidSettings(t *testing.T) {
 func TestMemoryRESTLimiterIsSafeForConcurrentUse(t *testing.T) {
 	t.Parallel()
 	const burst = 25
-	l, err := ratelimit.NewMemoryRESTLimiter(0.0001, burst, nil)
+	l, err := ratelimit.NewMemoryRESTLimiter(0.001, burst, nil)
 	require.NoError(t, err)
 
 	var allowed atomic.Int32
@@ -187,7 +187,7 @@ func TestRedisRESTLimiterIsAtomicAcrossClients(t *testing.T) {
 	client := testutil.NewRedis(t)
 	user := uuid.NewString()
 	const burst = 20
-	l, err := ratelimit.NewRedisRESTLimiter(client, 0.0001, burst)
+	l, err := ratelimit.NewRedisRESTLimiter(client, 0.001, burst, ratelimit.WithRedisTimeout(5*time.Second))
 	require.NoError(t, err)
 
 	var allowed atomic.Int32
@@ -209,14 +209,14 @@ func TestRedisRESTLimiterIsAtomicAcrossClients(t *testing.T) {
 func TestRedisRESTLimiterKeyExpiresWhenBucketIsFull(t *testing.T) {
 	client := testutil.NewRedis(t)
 	user := uuid.NewString()
-	l, err := ratelimit.NewRedisRESTLimiter(client, 100, 1)
+	l, err := ratelimit.NewRedisRESTLimiter(client, 5, 1)
 	require.NoError(t, err)
 
 	allow(t, l, user)
 	ttl, err := client.PTTL(context.Background(), ratelimit.RedisRESTKeyPrefix+user).Result()
 	require.NoError(t, err)
 	assert.Greater(t, ttl, time.Duration(0))
-	assert.LessOrEqual(t, ttl, 50*time.Millisecond)
+	assert.LessOrEqual(t, ttl, 250*time.Millisecond)
 }
 
 func TestRedisRESTLimiterReportsClientErrors(t *testing.T) {

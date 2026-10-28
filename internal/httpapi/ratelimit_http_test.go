@@ -248,7 +248,7 @@ func TestRealLimiterRecoversAfterTheWindow(t *testing.T) {
 func TestRealLimiterConcurrentRequestsOfOneUserAreCountedExactly(t *testing.T) {
 	t.Parallel()
 	const burst = 15
-	e := newRealLimiterEnv(t, 0.0001, burst)
+	e := newRealLimiterEnv(t, 0.001, burst)
 	var ok, limited, other atomic.Int32
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -277,7 +277,7 @@ func TestRealLimiterConcurrentRequestsOfOneUserAreCountedExactly(t *testing.T) {
 
 func TestRealLimiterOneUserDoesNotStarveAnotherUnderLoad(t *testing.T) {
 	t.Parallel()
-	e := newRealLimiterEnv(t, 0.0001, 5)
+	e := newRealLimiterEnv(t, 0.001, 5)
 
 	var wg sync.WaitGroup
 	for range 40 {

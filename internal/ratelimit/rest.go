@@ -2,7 +2,6 @@ package ratelimit
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -22,12 +21,18 @@ const (
 	memoryIdleMargin    = time.Minute
 )
 
+const (
+	MinRate  = 0.001
+	MaxRate  = 1_000_000
+	MaxBurst = 1_000_000
+)
+
 func validateRate(perSecond float64, burst int) error {
-	if perSecond <= 0 || math.IsNaN(perSecond) || math.IsInf(perSecond, 0) {
-		return errors.New("rate must be a positive number")
+	if math.IsNaN(perSecond) || perSecond < MinRate || perSecond > MaxRate {
+		return fmt.Errorf("rate must be between %g and %d requests per second", MinRate, MaxRate)
 	}
-	if burst < 1 {
-		return errors.New("burst must be at least 1")
+	if burst < 1 || burst > MaxBurst {
+		return fmt.Errorf("burst must be between 1 and %d", MaxBurst)
 	}
 	return nil
 }
@@ -80,9 +85,6 @@ func (l *MemoryRESTLimiter) Allow(_ context.Context, key string) (bool, time.Dur
 	}
 	b.lastSeen = now
 	r := b.limiter.ReserveN(now, 1)
-	if !r.OK() {
-		return false, time.Second, nil
-	}
 	delay := r.DelayFrom(now)
 	if delay <= 0 {
 		return true, 0, nil

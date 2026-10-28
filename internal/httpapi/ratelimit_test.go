@@ -188,3 +188,15 @@ func TestRateLimitDoesNotCoverTheWebSocketRoute(t *testing.T) {
 	assert.Equal(t, http.StatusAccepted, rec.Code)
 	assert.Empty(t, limiter.calls())
 }
+
+func TestRateLimitDoesNotCountClientDisconnectsAsBackendFailures(t *testing.T) {
+	t.Parallel()
+	limiter := &fakeLimiter{err: context.Canceled}
+	metrics := &fakeRateMetrics{}
+	e := newRateLimitedEnv(t, limiter, metrics)
+
+	rec := e.do(t, request{method: http.MethodGet, path: "/api/me", token: "good"})
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Zero(t, metrics.failures)
+}

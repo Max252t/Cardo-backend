@@ -20,12 +20,18 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
+	"github.com/Max252t/Cardo-backend/internal/clock"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/users"
+)
+
+const (
+	restBreakerThreshold = 5
+	restBreakerCooldown  = 5 * time.Second
 )
 
 func main() {
@@ -185,7 +191,7 @@ func newRESTLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) (
 	}
 	if rdb == nil {
 		logger.Warn("SINGLE_INSTANCE is enabled: using the in-memory REST rate limiter")
-		l, err := ratelimit.NewMemoryRESTLimiter(cfg.RESTRateLimit, cfg.RESTRateBurst, nil)
+		l, err := ratelimit.NewMemoryRESTLimiter(cfg.RESTRateLimit, cfg.RESTRateBurst, clock.System{})
 		if err != nil {
 			return nil, fmt.Errorf("build rest limiter: %w", err)
 		}
@@ -195,7 +201,7 @@ func newRESTLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) (
 	if err != nil {
 		return nil, fmt.Errorf("build rest limiter: %w", err)
 	}
-	return l, nil
+	return ratelimit.NewBreaker(l, restBreakerThreshold, restBreakerCooldown, clock.System{}), nil
 }
 
 type lifecycle struct {
