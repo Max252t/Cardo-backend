@@ -283,3 +283,61 @@ func TestLoadFromMetricsEnabledFlag(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "METRICS_ENABLED")
 }
+
+func TestLoadFromMetricsEnabledValues(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{"", true},
+		{"   ", true},
+		{"true", true},
+		{"TRUE", true},
+		{"True", true},
+		{"1", true},
+		{"t", true},
+		{"false", false},
+		{"FALSE", false},
+		{"False", false},
+		{"0", false},
+		{"f", false},
+		{" false ", false},
+	}
+	for _, tt := range tests {
+		t.Run("value "+tt.raw, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": tt.raw})))
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.MetricsEnabled)
+		})
+	}
+}
+
+func TestLoadFromRejectsInvalidMetricsEnabledValues(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"yes", "no", "on", "off", "enabled", "2", "-1"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Parallel()
+			_, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": raw})))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "METRICS_ENABLED")
+		})
+	}
+}
+
+func TestLoadFromReportsMetricsAndOtherErrorsTogether(t *testing.T) {
+	t.Parallel()
+	_, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "nope", "SINGLE_INSTANCE": "nope"})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "METRICS_ENABLED")
+	assert.Contains(t, err.Error(), "SINGLE_INSTANCE")
+}
+
+func TestLoadFromMetricsFlagIsIndependentFromSingleInstance(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "false", "SINGLE_INSTANCE": "true", "REDIS_URL": ""})))
+	require.NoError(t, err)
+	assert.False(t, cfg.MetricsEnabled)
+	assert.True(t, cfg.SingleInstance)
+}
