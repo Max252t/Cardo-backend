@@ -3,12 +3,15 @@ package httpapi_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -286,4 +289,56 @@ func TestReadyzReportsShutdownBeforeChecks(t *testing.T) {
 
 	rec = e.do(t, request{method: http.MethodGet, path: "/healthz"})
 	assert.Equal(t, http.StatusOK, rec.Code, "liveness stays green while draining")
+}
+
+type requestRecorder struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (r *requestRecorder) ObserveRequest(method, route string, status int, _ time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seen = append(r.seen, fmt.Sprintf("%s %s %d", method, route, status))
+}
+
+func TestMetricsMiddlewareUsesRouteTemplates(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	rec := &requestRecorder{}
+	r, err := httpapi.NewRouter(httpapi.Deps{
+		Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards,
+		Metrics: rec,
+	})
+	require.NoError(t, err)
+	for _, path := range []string{"/healthz", "/api/boards/not-a-uuid/events", "/nowhere/secret-token"} {
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
+	}
+
+	assert.Equal(t, []string{
+		"GET /healthz 200",
+		"GET /api/boards/:id/events 401",
+		"GET unmatched 404",
+	}, rec.seen)
+}
+
+func TestMetricsEndpointIsOptional(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("metrics-body"))
+	})
+
+	with, err := httpapi.NewRouter(httpapi.Deps{Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards, MetricsHandler: handler})
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	with.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "metrics-body", rec.Body.String())
+
+	without, err := httpapi.NewRouter(httpapi.Deps{Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards})
+	require.NoError(t, err)
+	rec = httptest.NewRecorder()
+	without.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }

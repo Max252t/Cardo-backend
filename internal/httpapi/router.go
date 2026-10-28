@@ -68,6 +68,8 @@ type Deps struct {
 	Claims         ClaimsParser
 	Sockets        BoardSockets
 	Members        MemberService
+	Metrics        Metrics
+	MetricsHandler http.Handler
 }
 
 type handlers struct {
@@ -82,6 +84,7 @@ type handlers struct {
 	claims       ClaimsParser
 	sockets      BoardSockets
 	members      MemberService
+	metricsHTTP  http.Handler
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -103,6 +106,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		claims:       d.Claims,
 		sockets:      d.Sockets,
 		members:      d.Members,
+		metricsHTTP:  d.MetricsHandler,
 	}
 
 	r := gin.New()
@@ -111,7 +115,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 	if err := r.SetTrustedProxies(d.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("httpapi: trusted proxies: %w", err)
 	}
-	r.Use(requestIDMiddleware(), h.logMiddleware(), h.recoveryMiddleware(), bodyLimitMiddleware(d.MaxBodyBytes))
+	r.Use(requestIDMiddleware(), metricsMiddleware(d.Metrics), h.logMiddleware(), h.recoveryMiddleware(), bodyLimitMiddleware(d.MaxBodyBytes))
 	r.NoRoute(func(c *gin.Context) {
 		abortWithError(c, http.StatusNotFound, CodeNotFound, "route not found")
 	})
@@ -126,6 +130,9 @@ func withDefaults(d Deps) Deps {
 	if d.Logger == nil {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
+	if d.Metrics == nil {
+		d.Metrics = nopMetrics{}
+	}
 	if d.MaxBodyBytes <= 0 {
 		d.MaxBodyBytes = defaultMaxBodyBytes
 	}
@@ -138,6 +145,9 @@ func withDefaults(d Deps) Deps {
 func (h *handlers) registerRoutes(r *gin.Engine) {
 	r.GET("/healthz", h.healthz)
 	r.GET("/readyz", h.readyz)
+	if h.metricsHTTP != nil {
+		r.GET("/metrics", gin.WrapH(h.metricsHTTP))
+	}
 
 	api := r.Group("/api")
 	public := api.Group("/auth")
