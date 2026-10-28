@@ -93,6 +93,12 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	}
 	defer rt.stop()
 
+	stopRetention, err := startRetention(ctx, cfg, store, obs, logger)
+	if err != nil {
+		return err
+	}
+	defer stopRetention()
+
 	lc := newLifecycle()
 	lc.closeSockets = rt.hub.Shutdown
 	defer lc.cancelBase()

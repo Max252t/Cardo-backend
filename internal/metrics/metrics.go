@@ -53,6 +53,7 @@ type Collector struct {
 	opDuration    *prometheus.HistogramVec
 	publishErrors prometheus.Counter
 	httpDuration  *prometheus.HistogramVec
+	retained      *prometheus.CounterVec
 }
 
 func New() *Collector {
@@ -89,11 +90,15 @@ func New() *Collector {
 			Help:    "HTTP request duration by method, route template and status.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"method", "route", "status"}),
+		retained: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "retention_deleted_total",
+			Help: "Rows removed by the retention jobs by table.",
+		}, []string{"table"}),
 	}
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		c.wsConnections, c.wsClosed, c.resyncs, c.ops, c.opDuration, c.publishErrors, c.httpDuration,
+		c.wsConnections, c.wsClosed, c.resyncs, c.ops, c.opDuration, c.publishErrors, c.httpDuration, c.retained,
 	)
 	return c
 }
@@ -133,6 +138,10 @@ func (c *Collector) ObserveRequest(method, route string, status int, d time.Dura
 		method = otherLabel
 	}
 	c.httpDuration.WithLabelValues(method, route, strconv.Itoa(status)).Observe(d.Seconds())
+}
+
+func (c *Collector) Deleted(table string, n int64) {
+	c.retained.WithLabelValues(table).Add(float64(n))
 }
 
 func (c *Collector) InstrumentPublisher(p boardevents.Publisher) boardevents.Publisher {

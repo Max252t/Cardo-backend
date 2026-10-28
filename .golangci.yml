@@ -53,6 +53,7 @@ linters:
             - "**/internal/auth/**"
             - "**/internal/presence/**"
             - "**/internal/members/**"
+            - "**/internal/retention/**"
           allow:
             - $gostd
             - github.com/google/uuid
