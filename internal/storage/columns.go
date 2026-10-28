@@ -37,6 +37,36 @@ func (b *BoardTx) ColumnRanks(ctx context.Context) ([]domain.RankedItem, error) 
 		b.board.ID)
 }
 
+func (b *BoardTx) ColumnRankOf(ctx context.Context, id uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM columns WHERE id = $1 AND board_id = $2 AND archived_at IS NULL`,
+		id, b.board.ID)
+}
+
+func (b *BoardTx) ColumnRankAfter(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM columns
+		 WHERE board_id = $1 AND archived_at IS NULL AND rank > $2 AND id <> $3
+		 ORDER BY rank LIMIT 1`,
+		b.board.ID, rank, exclude)
+}
+
+func (b *BoardTx) ColumnRankBefore(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM columns
+		 WHERE board_id = $1 AND archived_at IS NULL AND rank < $2 AND id <> $3
+		 ORDER BY rank DESC LIMIT 1`,
+		b.board.ID, rank, exclude)
+}
+
+func (b *BoardTx) ColumnLastRank(ctx context.Context, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM columns
+		 WHERE board_id = $1 AND archived_at IS NULL AND id <> $2
+		 ORDER BY rank DESC LIMIT 1`,
+		b.board.ID, exclude)
+}
+
 func (b *BoardTx) InsertColumn(ctx context.Context, c domain.Column) (domain.Column, error) {
 	col, err := scanColumn(b.tx.QueryRow(ctx,
 		`INSERT INTO columns (id, board_id, title, rank) VALUES ($1, $2, $3, $4)

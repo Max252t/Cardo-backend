@@ -38,6 +38,36 @@ func (b *BoardTx) CardRanks(ctx context.Context, columnID uuid.UUID) ([]domain.R
 		columnID, b.board.ID)
 }
 
+func (b *BoardTx) CardRankOf(ctx context.Context, columnID, id uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM cards WHERE id = $1 AND column_id = $2 AND board_id = $3 AND archived_at IS NULL`,
+		id, columnID, b.board.ID)
+}
+
+func (b *BoardTx) CardRankAfter(ctx context.Context, columnID uuid.UUID, rank string, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM cards
+		 WHERE column_id = $1 AND board_id = $2 AND archived_at IS NULL AND rank > $3 AND id <> $4
+		 ORDER BY rank LIMIT 1`,
+		columnID, b.board.ID, rank, exclude)
+}
+
+func (b *BoardTx) CardRankBefore(ctx context.Context, columnID uuid.UUID, rank string, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM cards
+		 WHERE column_id = $1 AND board_id = $2 AND archived_at IS NULL AND rank < $3 AND id <> $4
+		 ORDER BY rank DESC LIMIT 1`,
+		columnID, b.board.ID, rank, exclude)
+}
+
+func (b *BoardTx) CardLastRank(ctx context.Context, columnID, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM cards
+		 WHERE column_id = $1 AND board_id = $2 AND archived_at IS NULL AND id <> $3
+		 ORDER BY rank DESC LIMIT 1`,
+		columnID, b.board.ID, exclude)
+}
+
 func (b *BoardTx) InsertCard(ctx context.Context, c domain.Card) (domain.Card, error) {
 	card, err := scanCard(b.tx.QueryRow(ctx,
 		`INSERT INTO cards (id, board_id, column_id, title, description, rank, created_by, updated_by, created_at, updated_at)

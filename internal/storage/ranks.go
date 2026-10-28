@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Max252t/Cardo-backend/internal/domain"
@@ -12,6 +14,18 @@ func scanRankedItem(row pgx.Row) (domain.RankedItem, error) {
 	var it domain.RankedItem
 	err := row.Scan(&it.ID, &it.Rank)
 	return it, err
+}
+
+func (b *BoardTx) queryRank(ctx context.Context, sql string, args ...any) (string, bool, error) {
+	var rank string
+	err := b.tx.QueryRow(ctx, sql, args...).Scan(&rank)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return rank, true, nil
 }
 
 func splitRanked(items []domain.RankedItem) ([]uuid.UUID, []string) {
