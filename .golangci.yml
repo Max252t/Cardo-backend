@@ -75,6 +75,18 @@ linters:
               desc: test support must not be imported by production code
             - pkg: github.com/Max252t/Cardo-backend/internal/testutil
               desc: test support must not be imported by production code
+        metrics-adapter:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/cmd/api/**"
+            - "!**/internal/metrics/**"
+          deny:
+            - pkg: github.com/Max252t/Cardo-backend/internal/metrics
+              desc: the metrics adapter may only be wired in cmd/api
+            - pkg: github.com/prometheus
+              desc: Prometheus may only be used inside internal/metrics
     revive:
       rules:
         - name: exported
