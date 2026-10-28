@@ -13,6 +13,7 @@ const (
 	ReasonForbidden       = "forbidden"
 	ReasonValidation      = "validation_error"
 	ReasonRateLimited     = "rate_limited"
+	ReasonResyncRequired  = "resync_required"
 	ReasonInternal        = "internal"
 )
 

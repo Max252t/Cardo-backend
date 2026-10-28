@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -61,6 +62,9 @@ func replay(ctx context.Context, btx boardtx.Tx, prev domain.ProcessedOp, userID
 	switch stored.Kind {
 	case outcomeEvent:
 		ev, err := btx.EventBySeq(ctx, stored.Seq)
+		if errors.Is(err, domain.ErrNotFound) {
+			return boardcontent.OpOutcome{}, fmt.Errorf("replayed event %d: %w", stored.Seq, domain.ErrEventPruned)
+		}
 		if err != nil {
 			return boardcontent.OpOutcome{}, fmt.Errorf("read replayed event %d: %w", stored.Seq, err)
 		}
