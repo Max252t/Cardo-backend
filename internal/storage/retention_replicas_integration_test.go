@@ -28,17 +28,14 @@ func secondReplica(t *testing.T, pool *pgxpool.Pool, opts ...storage.Option) *st
 
 func lockedByAnother(t *testing.T, pool *pgxpool.Pool, key int64) bool {
 	t.Helper()
-	ctx := context.Background()
-	conn, err := pool.Acquire(ctx)
-	require.NoError(t, err)
-	defer conn.Release()
-	var got bool
-	require.NoError(t, conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&got))
-	if got {
-		_, err = conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, key)
-		require.NoError(t, err)
-	}
-	return !got
+	var held bool
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT EXISTS (
+		   SELECT 1 FROM pg_locks
+		   WHERE locktype = 'advisory' AND granted AND objsubid = 1
+		     AND ((classid::bigint << 32) | objid::bigint) = $1
+		 )`, key).Scan(&held))
+	return held
 }
 
 func holdEventRow(t *testing.T, pool *pgxpool.Pool, boardID uuid.UUID, seq int64) pgx.Tx {
