@@ -51,7 +51,7 @@ func newMigrator(t *testing.T, pool *pgxpool.Pool) *migrate.Migrate {
 func TestMigration000003RoundTrip(t *testing.T) {
 	pool := testutil.NewPool(t)
 	require.NoError(t, storage.Migrate(context.Background(), pool, discardLogger))
-	assert.Contains(t, indexNames(t, pool, "board_events"), "board_events_prune_idx")
+	assert.Contains(t, indexNames(t, pool, "board_events"), "board_events_board_created_idx")
 	assert.NotContains(t, indexNames(t, pool, "board_events"), "board_events_created_at_idx")
 
 	m := newMigrator(t, pool)
@@ -61,14 +61,14 @@ func TestMigration000003RoundTrip(t *testing.T) {
 	assert.EqualValues(t, 2, version)
 	assert.False(t, dirty)
 	assert.Contains(t, indexNames(t, pool, "board_events"), "board_events_created_at_idx")
-	assert.NotContains(t, indexNames(t, pool, "board_events"), "board_events_prune_idx")
+	assert.NotContains(t, indexNames(t, pool, "board_events"), "board_events_board_created_idx")
 
 	require.NoError(t, m.Steps(1))
 	version, dirty, err = m.Version()
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, version)
 	assert.False(t, dirty)
-	assert.Contains(t, indexNames(t, pool, "board_events"), "board_events_prune_idx")
+	assert.Contains(t, indexNames(t, pool, "board_events"), "board_events_board_created_idx")
 	assert.NotContains(t, indexNames(t, pool, "board_events"), "board_events_created_at_idx")
 }
 
@@ -86,7 +86,7 @@ func TestMigration000003KeepsExistingEvents(t *testing.T) {
 	assert.Equal(t, seqSpan(1, 5), retainedSeqs(t, pool, b.ID))
 }
 
-func TestPruneUsesTheDedicatedIndex(t *testing.T) {
+func TestPruneProbesUseTheBoardIndexes(t *testing.T) {
 	pool := testutil.NewMigratedPool(t)
 	ctx := context.Background()
 	store := storage.New(pool)
@@ -96,15 +96,22 @@ func TestPruneUsesTheDedicatedIndex(t *testing.T) {
 	_, err := pool.Exec(ctx, `ANALYZE board_events`)
 	require.NoError(t, err)
 
-	rows, err := pool.Query(ctx, `EXPLAIN SELECT board_id, seq FROM board_events WHERE created_at < now() - interval '30 days' AND (created_at, board_id, seq) > (to_timestamp(0), '00000000-0000-0000-0000-000000000000'::uuid, 0::bigint) ORDER BY created_at, board_id, seq LIMIT 100`)
-	require.NoError(t, err)
-	defer rows.Close()
-	var plan string
-	for rows.Next() {
-		var line string
-		require.NoError(t, rows.Scan(&line))
-		plan += line + "\n"
+	explain := func(sql string, args ...any) string {
+		rows, err := pool.Query(ctx, "EXPLAIN "+sql, args...)
+		require.NoError(t, err)
+		defer rows.Close()
+		var plan string
+		for rows.Next() {
+			var line string
+			require.NoError(t, rows.Scan(&line))
+			plan += line + "\n"
+		}
+		require.NoError(t, rows.Err())
+		return plan
 	}
-	require.NoError(t, rows.Err())
-	assert.Contains(t, plan, "board_events_prune_idx")
+	expired := explain(`SELECT seq FROM board_events WHERE board_id = $1 AND created_at < $2 ORDER BY created_at DESC LIMIT 1`, b.ID, time.Now())
+	assert.Contains(t, expired, "board_events_board_created_idx")
+	batch := explain(`DELETE FROM board_events WHERE board_id = $1 AND seq IN (SELECT seq FROM board_events WHERE board_id = $1 AND seq <= $2 ORDER BY seq LIMIT $3)`, b.ID, int64(100), 10)
+	assert.Contains(t, batch, "board_events_pkey")
+	assert.NotContains(t, batch, "Seq Scan on board_events")
 }

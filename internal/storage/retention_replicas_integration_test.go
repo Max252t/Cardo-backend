@@ -152,6 +152,10 @@ func TestPruneReleasesLockWhenTheJobFails(t *testing.T) {
 	pool := testutil.NewMigratedPool(t)
 	store := storage.New(pool)
 	ctx := context.Background()
+	owner := testutil.CreateUser(t, store, testutil.UniqueEmail("fail"))
+	b := createBoard(t, store, owner.ID, "b")
+	appendEvents(t, store, b.ID, 3)
+	ageEvents(t, pool, b.ID, 3, 9*24*time.Hour)
 	_, err := pool.Exec(ctx, `ALTER TABLE board_events RENAME TO board_events_gone`)
 	require.NoError(t, err)
 
@@ -302,8 +306,8 @@ func TestPruneEventsHandlesSoftDeletedBoards(t *testing.T) {
 
 	res, err := store.PruneEvents(ctx, time.Now().Add(-7*24*time.Hour), 4, 2)
 	require.NoError(t, err)
-	assert.EqualValues(t, 5, res.Deleted)
-	assert.Equal(t, seqSpan(6, 9), retainedSeqs(t, pool, b.ID))
+	assert.EqualValues(t, 9, res.Deleted, "a deleted board ignores the keep minimum")
+	assert.Empty(t, retainedSeqs(t, pool, b.ID))
 }
 
 func TestPruneEventsCutoffBoundaryIsExclusive(t *testing.T) {
