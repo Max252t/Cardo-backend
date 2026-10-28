@@ -83,7 +83,7 @@ func TestUnlabelledMetricsStartAtZero(t *testing.T) {
 	c := metrics.New()
 	assert.Equal(t, 0.0, sample(t, c, "ws_connections"))
 	assert.Equal(t, 0.0, sample(t, c, "event_publish_errors_total"))
-	assert.Equal(t, 0.0, sample(t, c, "op_apply_duration_seconds_count"))
+	assert.False(t, hasSeries(t, c, `op_apply_duration_seconds_count{type="card.create"}`))
 	assert.False(t, hasSeries(t, c, `ws_closed_total{code="1001"}`))
 }
 
@@ -107,7 +107,7 @@ func TestKnownCloseCodesKeepTheirOwnLabel(t *testing.T) {
 	t.Parallel()
 	c := metrics.New()
 	known := []int{
-		protocol.CloseNormal, protocol.CloseGoingAway, 1006, 1009, 1011,
+		protocol.CloseNormal, protocol.CloseGoingAway, protocol.CloseWSProtocol, protocol.CloseNoStatus, protocol.CloseAbnormal, protocol.CloseMessageTooBig, protocol.CloseInternalError,
 		protocol.CloseTryAgainLater, protocol.CloseInvalidToken, protocol.CloseAccessRevoked,
 		protocol.CloseBoardDeleted, protocol.CloseRateLimited, protocol.CloseSlowClient, protocol.CloseProtocolError,
 	}
@@ -124,7 +124,7 @@ func TestKnownCloseCodesKeepTheirOwnLabel(t *testing.T) {
 func TestUnknownCloseCodesCollapseIntoOther(t *testing.T) {
 	t.Parallel()
 	c := metrics.New()
-	unknown := []int{0, -1, 1, 999, 1002, 1005, 3000, 4000, 4002, 4401, 4999, 5000, 65535}
+	unknown := []int{0, -1, 1, 999, 3000, 4000, 4002, 4401, 4999, 5000, 65535}
 	for _, code := range unknown {
 		c.ConnectionOpened()
 		c.ConnectionClosed(code)
@@ -140,7 +140,7 @@ func TestCloseCodeCardinalityIsBounded(t *testing.T) {
 		c.ConnectionOpened()
 		c.ConnectionClosed(code)
 	}
-	assert.LessOrEqual(t, countSeries(t, c, "ws_closed_total{"), 13)
+	assert.LessOrEqual(t, countSeries(t, c, "ws_closed_total{"), 15)
 	assert.Equal(t, 0.0, sample(t, c, "ws_connections"))
 }
 
@@ -167,12 +167,38 @@ func TestObserveOpFeedsDurationHistogram(t *testing.T) {
 	c.ObserveOp("card.move", "not_found", 40*time.Millisecond)
 	c.ObserveOp("card.move", "applied", 2*time.Second)
 
-	assert.Equal(t, 3.0, sample(t, c, "op_apply_duration_seconds_count"))
-	assert.InDelta(t, 2.043, sample(t, c, "op_apply_duration_seconds_sum"), 1e-9)
-	assert.Equal(t, 1.0, sample(t, c, `op_apply_duration_seconds_bucket{le="0.005"}`))
-	assert.Equal(t, 2.0, sample(t, c, `op_apply_duration_seconds_bucket{le="0.05"}`))
-	assert.Equal(t, 2.0, sample(t, c, `op_apply_duration_seconds_bucket{le="1"}`))
-	assert.Equal(t, 3.0, sample(t, c, `op_apply_duration_seconds_bucket{le="+Inf"}`))
+	assert.Equal(t, 1.0, sample(t, c, `op_apply_duration_seconds_count{type="card.create"}`))
+	assert.Equal(t, 2.0, sample(t, c, `op_apply_duration_seconds_count{type="card.move"}`))
+	assert.InDelta(t, 2.04, sample(t, c, `op_apply_duration_seconds_sum{type="card.move"}`), 1e-9)
+	assert.Equal(t, 1.0, sample(t, c, `op_apply_duration_seconds_bucket{type="card.create",le="0.005"}`))
+	assert.Equal(t, 1.0, sample(t, c, `op_apply_duration_seconds_bucket{type="card.move",le="0.05"}`))
+	assert.Equal(t, 1.0, sample(t, c, `op_apply_duration_seconds_bucket{type="card.move",le="1"}`))
+	assert.Equal(t, 2.0, sample(t, c, `op_apply_duration_seconds_bucket{type="card.move",le="+Inf"}`))
+}
+
+func TestRefusedConnectionsCountWithoutTouchingTheGauge(t *testing.T) {
+	t.Parallel()
+	c := metrics.New()
+	c.ConnectionRefused(protocol.CloseTryAgainLater)
+	c.ConnectionRefused(protocol.CloseGoingAway)
+	c.ConnectionRefused(31337)
+
+	assert.Equal(t, 0.0, sample(t, c, "ws_connections"))
+	assert.Equal(t, 1.0, sample(t, c, `ws_closed_total{code="1013"}`))
+	assert.Equal(t, 1.0, sample(t, c, `ws_closed_total{code="1001"}`))
+	assert.Equal(t, 1.0, sample(t, c, `ws_closed_total{code="other"}`))
+}
+
+func TestRejectedOpsShareTheOpsCounterWithoutADurationSample(t *testing.T) {
+	t.Parallel()
+	c := metrics.New()
+	c.OpRejected("op.card.create", "rate_limited")
+	c.OpRejected("op.card.create", "rate_limited")
+	c.ObserveOp("op.card.create", "applied", time.Millisecond)
+
+	assert.Equal(t, 2.0, sample(t, c, `ops_total{result="rate_limited",type="op.card.create"}`))
+	assert.Equal(t, 1.0, sample(t, c, `ops_total{result="applied",type="op.card.create"}`))
+	assert.Equal(t, 1.0, sample(t, c, `op_apply_duration_seconds_count{type="op.card.create"}`))
 }
 
 func TestResyncCountsByKind(t *testing.T) {
@@ -285,7 +311,7 @@ func TestConcurrentUpdatesAreExact(t *testing.T) {
 	assert.Equal(t, 0.0, sample(t, c, "ws_connections"))
 	assert.Equal(t, total, sample(t, c, `ws_closed_total{code="1001"}`))
 	assert.Equal(t, total, sample(t, c, `ops_total{result="applied",type="card.create"}`))
-	assert.Equal(t, total, sample(t, c, "op_apply_duration_seconds_count"))
+	assert.Equal(t, total, sample(t, c, `op_apply_duration_seconds_count{type="card.create"}`))
 	assert.Equal(t, total, sample(t, c, `resync_total{kind="delta"}`))
 	assert.Equal(t, total, sample(t, c, `http_request_duration_seconds_count{method="GET",route="/x",status="200"}`))
 }

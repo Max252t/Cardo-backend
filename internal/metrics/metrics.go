@@ -15,12 +15,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
-const (
-	otherLabel         = "other"
-	closeMessageTooBig = 1009
-	closeInternalError = 1011
-	closeAbnormal      = 1006
-)
+const otherLabel = "other"
 
 var knownMethods = map[string]struct{}{
 	http.MethodGet:     {},
@@ -35,9 +30,11 @@ var knownMethods = map[string]struct{}{
 var knownCloseCodes = map[int]struct{}{
 	protocol.CloseNormal:        {},
 	protocol.CloseGoingAway:     {},
-	closeMessageTooBig:          {},
-	closeInternalError:          {},
-	closeAbnormal:               {},
+	protocol.CloseWSProtocol:    {},
+	protocol.CloseNoStatus:      {},
+	protocol.CloseAbnormal:      {},
+	protocol.CloseMessageTooBig: {},
+	protocol.CloseInternalError: {},
 	protocol.CloseTryAgainLater: {},
 	protocol.CloseInvalidToken:  {},
 	protocol.CloseAccessRevoked: {},
@@ -53,7 +50,7 @@ type Collector struct {
 	wsClosed      *prometheus.CounterVec
 	resyncs       *prometheus.CounterVec
 	ops           *prometheus.CounterVec
-	opDuration    prometheus.Histogram
+	opDuration    *prometheus.HistogramVec
 	publishErrors prometheus.Counter
 	httpDuration  *prometheus.HistogramVec
 }
@@ -78,14 +75,14 @@ func New() *Collector {
 			Name: "ops_total",
 			Help: "Processed board operations by type and result.",
 		}, []string{"type", "result"}),
-		opDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+		opDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "op_apply_duration_seconds",
-			Help:    "Time to apply a board operation.",
+			Help:    "Time to apply a board operation by type.",
 			Buckets: prometheus.DefBuckets,
-		}),
+		}, []string{"type"}),
 		publishErrors: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "event_publish_errors_total",
-			Help: "Failed board event publications.",
+			Help: "Failed board event publish batches.",
 		}),
 		httpDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "http_request_duration_seconds",
@@ -107,7 +104,7 @@ func (c *Collector) Handler() http.Handler {
 
 func (c *Collector) ObserveOp(opType, result string, d time.Duration) {
 	c.ops.WithLabelValues(opType, result).Inc()
-	c.opDuration.Observe(d.Seconds())
+	c.opDuration.WithLabelValues(opType).Observe(d.Seconds())
 }
 
 func (c *Collector) ConnectionOpened() {
@@ -117,6 +114,14 @@ func (c *Collector) ConnectionOpened() {
 func (c *Collector) ConnectionClosed(code int) {
 	c.wsConnections.Dec()
 	c.wsClosed.WithLabelValues(closeCodeLabel(code)).Inc()
+}
+
+func (c *Collector) ConnectionRefused(code int) {
+	c.wsClosed.WithLabelValues(closeCodeLabel(code)).Inc()
+}
+
+func (c *Collector) OpRejected(opType, reason string) {
+	c.ops.WithLabelValues(opType, reason).Inc()
 }
 
 func (c *Collector) Resync(kind string) {

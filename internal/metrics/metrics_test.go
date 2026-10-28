@@ -45,7 +45,7 @@ func TestCollectorExposesRequiredMetrics(t *testing.T) {
 		`resync_total{kind="delta"} 1`,
 		`ops_total{result="applied",type="card.create"} 1`,
 		`ops_total{result="version_conflict",type="card.create"} 1`,
-		"op_apply_duration_seconds_count 2",
+		`op_apply_duration_seconds_count{type="card.create"} 2`,
 		`http_request_duration_seconds_count{method="GET",route="/api/boards/:board_id",status="200"} 1`,
 		`http_request_duration_seconds_count{method="other",route="unmatched",status="404"} 1`,
 		"go_goroutines",

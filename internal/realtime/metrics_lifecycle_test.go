@@ -272,7 +272,7 @@ func TestMetricsRecordAbruptDisconnectBeforeHello(t *testing.T) {
 
 	require.NoError(t, c.UnderlyingConn().Close())
 
-	assert.Equal(t, []int{realtime.CloseAbnormal}, awaitClosed(t, rec, 1))
+	assert.Equal(t, []int{protocol.CloseAbnormal}, awaitClosed(t, rec, 1))
 	opened, _, resyncs := rec.snapshot()
 	assert.Equal(t, 1, opened)
 	assert.Empty(t, resyncs)
@@ -355,7 +355,7 @@ func TestMetricsOpenedAndClosedBalanceAfterMixedChurn(t *testing.T) {
 	waitConnections(t, inst, env.Board.ID, 0)
 	assert.Len(t, closed, 3*each)
 	assert.Equal(t, each, countCode(closed, protocol.CloseNormal))
-	assert.Equal(t, each, countCode(closed, realtime.CloseAbnormal))
+	assert.Equal(t, each, countCode(closed, protocol.CloseAbnormal))
 	assert.Equal(t, each, countCode(closed, protocol.CloseAccessRevoked))
 }
 

@@ -133,7 +133,7 @@ func (c *Client) finalCloseCode() int {
 	if code := c.closeCode.Load(); code != 0 {
 		return int(code)
 	}
-	return CloseAbnormal
+	return protocol.CloseAbnormal
 }
 
 func (c *Client) noteCloseCode(code int) {
@@ -141,6 +141,10 @@ func (c *Client) noteCloseCode(code int) {
 }
 
 func (c *Client) noteReadError(err error) {
+	if errors.Is(err, websocket.ErrReadLimit) {
+		c.noteCloseCode(protocol.CloseMessageTooBig)
+		return
+	}
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) {
 		c.noteCloseCode(closeErr.Code)

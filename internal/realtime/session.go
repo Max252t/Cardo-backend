@@ -7,7 +7,6 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 
 	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
@@ -161,6 +160,7 @@ func (c *Client) onOp(env protocol.Envelope) {
 		return
 	}
 	if !c.allowOp() {
+		c.hub.metrics.OpRejected(op.Type, boardcontent.ReasonRateLimited)
 		c.localNack(op.OpID, boardcontent.ReasonRateLimited, "too many operations, slow down")
 		if c.rateAbuse() {
 			c.closeWith(protocol.CloseRateLimited, "rate limit exceeded")
@@ -168,6 +168,7 @@ func (c *Client) onOp(env protocol.Envelope) {
 		return
 	}
 	if !c.canWrite() {
+		c.hub.metrics.OpRejected(op.Type, boardcontent.ReasonForbidden)
 		c.localNack(op.OpID, boardcontent.ReasonForbidden, msgRoleForbidsChanges)
 		return
 	}
@@ -243,7 +244,7 @@ func (c *Client) failHandshake(err error) {
 	default:
 		c.hub.logger.Error("websocket handshake failed", c.logAttrs(slog.Any("error", err))...)
 		c.sendError(boardcontent.ReasonInternal, "synchronization failed, reconnect")
-		c.closeWith(websocket.CloseInternalServerErr, "sync failed")
+		c.closeWith(protocol.CloseInternalError, "sync failed")
 	}
 }
 
