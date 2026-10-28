@@ -54,6 +54,8 @@ type Collector struct {
 	publishErrors prometheus.Counter
 	httpDuration  *prometheus.HistogramVec
 	retained      *prometheus.CounterVec
+	restLimited   prometheus.Counter
+	restLimitErrs prometheus.Counter
 }
 
 func New() *Collector {
@@ -94,11 +96,19 @@ func New() *Collector {
 			Name: "retention_deleted_total",
 			Help: "Rows removed by the retention jobs by table.",
 		}, []string{"table"}),
+		restLimited: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "rest_rate_limited_total",
+			Help: "REST requests rejected by the per-user rate limit.",
+		}),
+		restLimitErrs: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "rest_rate_limiter_errors_total",
+			Help: "REST rate limiter backend failures, requests are allowed through.",
+		}),
 	}
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		c.wsConnections, c.wsClosed, c.resyncs, c.ops, c.opDuration, c.publishErrors, c.httpDuration, c.retained,
+		c.wsConnections, c.wsClosed, c.resyncs, c.ops, c.opDuration, c.publishErrors, c.httpDuration, c.retained, c.restLimited, c.restLimitErrs,
 	)
 	return c
 }
@@ -142,6 +152,14 @@ func (c *Collector) ObserveRequest(method, route string, status int, d time.Dura
 
 func (c *Collector) Deleted(table string, n int64) {
 	c.retained.WithLabelValues(table).Add(float64(n))
+}
+
+func (c *Collector) RateLimited() {
+	c.restLimited.Inc()
+}
+
+func (c *Collector) RateLimiterError() {
+	c.restLimitErrs.Inc()
 }
 
 func (c *Collector) InstrumentPublisher(p boardevents.Publisher) boardevents.Publisher {

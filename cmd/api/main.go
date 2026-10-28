@@ -103,6 +103,11 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	lc.closeSockets = rt.hub.Shutdown
 	defer lc.cancelBase()
 
+	restLimiter, err := newRESTLimiter(cfg, rdb, logger)
+	if err != nil {
+		return err
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	router, err := httpapi.NewRouter(httpapi.Deps{
 		Logger:         logger,
@@ -118,6 +123,8 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		TrustedProxies: cfg.TrustedProxies,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
 		Metrics:        obs.http,
+		RateLimiter:    restLimiter,
+		RateMetrics:    obs.rest,
 	})
 	if err != nil {
 		return err
@@ -169,6 +176,26 @@ func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) 
 		return ratelimit.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
 	}
 	return ratelimit.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)
+}
+
+func newRESTLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) (httpapi.RateLimiter, error) {
+	if cfg.RESTRateLimit == 0 {
+		logger.Warn("REST_RATE_LIMIT is 0: the per-user REST rate limit is disabled")
+		return nil, nil
+	}
+	if rdb == nil {
+		logger.Warn("SINGLE_INSTANCE is enabled: using the in-memory REST rate limiter")
+		l, err := ratelimit.NewMemoryRESTLimiter(cfg.RESTRateLimit, cfg.RESTRateBurst, nil)
+		if err != nil {
+			return nil, fmt.Errorf("build rest limiter: %w", err)
+		}
+		return l, nil
+	}
+	l, err := ratelimit.NewRedisRESTLimiter(rdb, cfg.RESTRateLimit, cfg.RESTRateBurst)
+	if err != nil {
+		return nil, fmt.Errorf("build rest limiter: %w", err)
+	}
+	return l, nil
 }
 
 type lifecycle struct {
