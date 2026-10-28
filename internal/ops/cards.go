@@ -178,6 +178,20 @@ func (a *applier) cardArchive(ctx context.Context, p *boardcontent.CardArchive) 
 
 func (a *applier) cardRanks(columnID uuid.UUID) rankScope {
 	return rankScope{
+		probe: &rankProbe{
+			rankOf: func(ctx context.Context, id uuid.UUID) (string, bool, error) {
+				return a.btx.CardRankOf(ctx, columnID, id)
+			},
+			after: func(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error) {
+				return a.btx.CardRankAfter(ctx, columnID, rank, exclude)
+			},
+			before: func(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error) {
+				return a.btx.CardRankBefore(ctx, columnID, rank, exclude)
+			},
+			last: func(ctx context.Context, exclude uuid.UUID) (string, bool, error) {
+				return a.btx.CardLastRank(ctx, columnID, exclude)
+			},
+		},
 		load: func(ctx context.Context) ([]domain.RankedItem, error) {
 			return a.btx.CardRanks(ctx, columnID)
 		},

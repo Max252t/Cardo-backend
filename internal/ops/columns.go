@@ -101,7 +101,17 @@ func (a *applier) columnArchive(ctx context.Context, p *boardcontent.ColumnArchi
 }
 
 func (a *applier) columnRanks() rankScope {
-	return rankScope{load: a.btx.ColumnRanks, rerank: a.btx.RerankColumns, announce: a.emitColumnRebalance}
+	return rankScope{
+		probe: &rankProbe{
+			rankOf: a.btx.ColumnRankOf,
+			after:  a.btx.ColumnRankAfter,
+			before: a.btx.ColumnRankBefore,
+			last:   a.btx.ColumnLastRank,
+		},
+		load:     a.btx.ColumnRanks,
+		rerank:   a.btx.RerankColumns,
+		announce: a.emitColumnRebalance,
+	}
 }
 
 func (a *applier) emitColumnRebalance(ctx context.Context, pl placement) error {
