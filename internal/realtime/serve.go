@@ -59,6 +59,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, boardID uuid.UUID, m
 		_ = conn.Close()
 		return err
 	}
+	h.metrics.ConnectionOpened()
 	go c.run()
 	return nil
 }

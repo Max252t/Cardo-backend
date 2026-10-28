@@ -56,6 +56,7 @@ type Client struct {
 	expiryReset   chan struct{}
 	latestSeq     atomic.Int64
 	closing       atomic.Bool
+	closeCode     atomic.Int64
 	opsOpen       atomic.Bool
 	roleCheckedAt atomic.Int64
 
@@ -125,6 +126,25 @@ func (c *Client) run() {
 	<-c.writeDone
 	c.handshakes.Wait()
 	c.hub.leave(c)
+	c.hub.metrics.ConnectionClosed(c.finalCloseCode())
+}
+
+func (c *Client) finalCloseCode() int {
+	if code := c.closeCode.Load(); code != 0 {
+		return int(code)
+	}
+	return CloseAbnormal
+}
+
+func (c *Client) noteCloseCode(code int) {
+	c.closeCode.CompareAndSwap(0, int64(code))
+}
+
+func (c *Client) noteReadError(err error) {
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		c.noteCloseCode(closeErr.Code)
+	}
 }
 
 func (c *Client) noteSeq(seq int64) {
@@ -221,6 +241,7 @@ func (c *Client) closeWith(code int, reason string) {
 	if !c.closing.CompareAndSwap(false, true) {
 		return
 	}
+	c.noteCloseCode(code)
 	select {
 	case c.send <- outbound{isClose: true, closeCode: code, closeReason: reason}:
 	default:
@@ -232,6 +253,7 @@ func (c *Client) closeNow(code int, reason string) {
 	if !c.closing.CompareAndSwap(false, true) {
 		return
 	}
+	c.noteCloseCode(code)
 	go c.forceClose(code, reason)
 }
 
@@ -302,6 +324,7 @@ func (c *Client) readPump() {
 		messageType, data, err := c.conn.ReadMessage()
 		if err != nil {
 			c.hub.logger.Debug("websocket read ended", c.logAttrs(slog.Any("error", err))...)
+			c.noteReadError(err)
 			c.closeIfIdle(err)
 			return
 		}
@@ -377,6 +400,7 @@ func (c *Client) closeIfIdle(err error) {
 		return
 	}
 	if c.closing.CompareAndSwap(false, true) {
+		c.noteCloseCode(protocol.CloseNormal)
 		c.sendCloseFrame(protocol.CloseNormal, "pong timeout")
 	}
 }

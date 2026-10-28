@@ -15,8 +15,10 @@ func (c *Client) catchUp(ctx context.Context, lastSeq *int64) (int64, error) {
 		return 0, err
 	}
 	if res.IsSnapshot() {
+		c.hub.metrics.Resync(ResyncSnapshot)
 		return res.Seq, c.sendSnapshot(*res.Snapshot)
 	}
+	c.hub.metrics.Resync(ResyncDelta)
 	return res.Seq, c.sendDelta(res.Events)
 }
 
