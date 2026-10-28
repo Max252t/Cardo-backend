@@ -154,10 +154,10 @@ All member changes are made under the board lock and produce `member.added`, `me
 
 - `GET /members` (any member): `user_id`, `display_name`, `avatar_color`, `role`, `joined_at`.
 - `POST /members` (owner), body `{"email", "role": "editor|viewer"}`: adds an existing user. Unknown email is `404 not_found`, already a member is `409 already_member`. Non-owners get `403` (or `404` when not a member) before any email lookup, so they cannot probe which emails are registered.
-- `PATCH /members/:userId` (owner), body `{"role": "editor|viewer"}`: the owner's role cannot be changed (`400 validation_error`); setting the current role is a no-op without an event.
+- `PATCH /members/:userId` (owner), body `{"role": "editor|viewer"}`: targeting the owner is `403 forbidden`, the same as for removal, because ownership transfer is not supported; setting the current role is a no-op without an event.
 - `DELETE /members/:userId`: the owner removes anyone except themselves; any other member may remove only themselves (leave). The owner cannot leave (`403`).
 - `POST /invites` (owner), body `{"role": "editor|viewer", "expires_in": seconds (default 7 days, max 30 days), "max_uses": 1..100 (default 1)}`: returns `id`, `role`, `expires_at`, `max_uses`, `uses` and the raw `token` exactly once. The token is 256 bits of randomness, base64url; only its SHA-256 is stored.
-- `POST /api/invites/:token/accept` (any user): atomically checks the invite is not revoked, not expired, has uses left and that the board is not deleted, then consumes one use and adds the member (`member.added`). Unknown token is `404`; a revoked, expired or exhausted invite is `410 invite_unavailable`. A user who is already a member gets `200` with the board and their current role, and no use is consumed. The token travels in the path, so request logs record only the route template (`/api/invites/:token/accept`).
+- `POST /api/invites/:token/accept` (any user): atomically checks the invite is not revoked, not expired, has uses left and that the board is not deleted, then consumes one use and adds the member (`member.added`). Unknown token is `404`; a revoked, expired or exhausted invite is `410 invite_unavailable`. A user who is already a member gets `200` with the board and their current role even when the invite has since been revoked, has expired or is exhausted: the membership check comes first, so no use is consumed and no event is emitted. The token travels in the path, so request logs record only the route template (`/api/invites/:token/accept`).
 
 ## Development workflow
 

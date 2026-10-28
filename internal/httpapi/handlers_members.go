@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -45,40 +44,6 @@ type createInviteRequest struct {
 	MaxUses   int    `json:"max_uses"`
 }
 
-type memberListResponse struct {
-	Members []protocol.Member `json:"members"`
-}
-
-type inviteResponse struct {
-	ID        uuid.UUID   `json:"id"`
-	Role      domain.Role `json:"role"`
-	ExpiresAt time.Time   `json:"expires_at"`
-	MaxUses   int         `json:"max_uses"`
-	Uses      int         `json:"uses"`
-}
-
-type createdInviteResponse struct {
-	inviteResponse
-	Token string `json:"token"`
-}
-
-type inviteListResponse struct {
-	Invites []inviteResponse `json:"invites"`
-}
-
-func toInviteResponse(inv domain.Invite) inviteResponse {
-	return inviteResponse{ID: inv.ID, Role: inv.Role, ExpiresAt: inv.ExpiresAt.UTC(), MaxUses: inv.MaxUses, Uses: inv.Uses}
-}
-
-func (h *handlers) uuidParam(c *gin.Context, name string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(c.Param(name))
-	if err != nil {
-		h.fail(c, domain.NewValidationError(name, "must be a UUID"))
-		return uuid.Nil, false
-	}
-	return id, true
-}
-
 func (h *handlers) listMembers(c *gin.Context) {
 	boardID, ok := h.boardIDFromPath(c)
 	if !ok {
@@ -89,11 +54,7 @@ func (h *handlers) listMembers(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	resp := memberListResponse{Members: make([]protocol.Member, 0, len(list))}
-	for _, m := range list {
-		resp.Members = append(resp.Members, protocol.FromMember(m))
-	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, toMemberListResponse(list))
 }
 
 func (h *handlers) addMember(c *gin.Context) {
@@ -168,7 +129,7 @@ func (h *handlers) createInvite(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, createdInviteResponse{inviteResponse: toInviteResponse(created.Invite), Token: created.Token})
+	c.JSON(http.StatusCreated, toCreatedInviteResponse(created))
 }
 
 func (h *handlers) listInvites(c *gin.Context) {
@@ -181,11 +142,7 @@ func (h *handlers) listInvites(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	resp := inviteListResponse{Invites: make([]inviteResponse, 0, len(list))}
-	for _, inv := range list {
-		resp.Invites = append(resp.Invites, toInviteResponse(inv))
-	}
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, toInviteListResponse(list))
 }
 
 func (h *handlers) revokeInvite(c *gin.Context) {
