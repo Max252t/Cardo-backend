@@ -52,11 +52,12 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	expiresAt   atomic.Int64
-	expiryReset chan struct{}
-	latestSeq   atomic.Int64
-	closing     atomic.Bool
-	opsOpen     atomic.Bool
+	expiresAt     atomic.Int64
+	expiryReset   chan struct{}
+	latestSeq     atomic.Int64
+	closing       atomic.Bool
+	opsOpen       atomic.Bool
+	roleCheckedAt atomic.Int64
 
 	helloReceived chan struct{}
 	readDone      chan struct{}

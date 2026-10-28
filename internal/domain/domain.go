@@ -20,6 +20,8 @@ var (
 	ErrOverloaded        = errors.New("server overloaded")
 	ErrBusy              = errors.New("resource busy")
 	ErrGone              = errors.New("gone")
+	ErrAlreadyMember     = errors.New("already a member")
+	ErrInviteUnavailable = errors.New("invite is revoked, expired or exhausted")
 )
 
 type RateLimitError struct {
@@ -205,4 +207,25 @@ type CatchUp struct {
 
 func (c CatchUp) IsSnapshot() bool {
 	return c.Snapshot != nil
+}
+
+type Invite struct {
+	ID        uuid.UUID
+	BoardID   uuid.UUID
+	TokenHash string
+	Role      Role
+	CreatedBy uuid.UUID
+	ExpiresAt time.Time
+	MaxUses   int
+	Uses      int
+	RevokedAt *time.Time
+}
+
+func (i Invite) Usable(now time.Time) bool {
+	return i.RevokedAt == nil && now.Before(i.ExpiresAt) && i.Uses < i.MaxUses
+}
+
+type NewInvite struct {
+	Invite
+	Token string
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/auth"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
 type userResponse struct {
@@ -85,15 +86,56 @@ type boardListResponse struct {
 }
 
 func toBoardListResponse(list []domain.BoardWithRole) boardListResponse {
-	resp := boardListResponse{Boards: make([]boardResponse, 0, len(list))}
-	for _, b := range list {
-		resp.Boards = append(resp.Boards, toBoardResponse(b))
-	}
-	return resp
+	return boardListResponse{Boards: mapSlice(list, toBoardResponse)}
 }
 
 type readinessResponse struct {
 	Status string            `json:"status,omitempty"`
 	Error  *ErrorBody        `json:"error,omitempty"`
 	Checks map[string]string `json:"checks"`
+}
+
+func mapSlice[T, U any](in []T, fn func(T) U) []U {
+	out := make([]U, 0, len(in))
+	for _, v := range in {
+		out = append(out, fn(v))
+	}
+	return out
+}
+
+type memberListResponse struct {
+	Members []protocol.Member `json:"members"`
+}
+
+func toMemberListResponse(list []domain.Member) memberListResponse {
+	return memberListResponse{Members: mapSlice(list, protocol.FromMember)}
+}
+
+type inviteResponse struct {
+	ID        uuid.UUID   `json:"id"`
+	Role      domain.Role `json:"role"`
+	ExpiresAt time.Time   `json:"expires_at"`
+	MaxUses   int         `json:"max_uses"`
+	Uses      int         `json:"uses"`
+}
+
+func toInviteResponse(inv domain.Invite) inviteResponse {
+	return inviteResponse{ID: inv.ID, Role: inv.Role, ExpiresAt: inv.ExpiresAt.UTC(), MaxUses: inv.MaxUses, Uses: inv.Uses}
+}
+
+type createdInviteResponse struct {
+	inviteResponse
+	Token string `json:"token"`
+}
+
+func toCreatedInviteResponse(created domain.NewInvite) createdInviteResponse {
+	return createdInviteResponse{inviteResponse: toInviteResponse(created.Invite), Token: created.Token}
+}
+
+type inviteListResponse struct {
+	Invites []inviteResponse `json:"invites"`
+}
+
+func toInviteListResponse(list []domain.Invite) inviteListResponse {
+	return inviteListResponse{Invites: mapSlice(list, toInviteResponse)}
 }

@@ -124,6 +124,12 @@ func (c *Client) onRefresh(env protocol.Envelope) {
 		c.sendError(protocol.CodeInvalidToken, "access token belongs to another user")
 		return
 	}
+	ctx, cancel := context.WithTimeout(c.ctx, c.hub.cfg.BusTimeout)
+	defer cancel()
+	c.recheckMembership(ctx)
+	if c.closing.Load() {
+		return
+	}
 	c.setExpiry(claims.ExpiresAt)
 	c.sendMessage(protocol.TypeAuthRefreshed, protocol.AuthRefreshed{ExpiresAt: claims.ExpiresAt.UnixMilli()})
 }
@@ -161,7 +167,7 @@ func (c *Client) onOp(env protocol.Envelope) {
 		}
 		return
 	}
-	if !c.Role().AtLeast(domain.RoleEditor) {
+	if !c.canWrite() {
 		c.localNack(op.OpID, boardcontent.ReasonForbidden, msgRoleForbidsChanges)
 		return
 	}
@@ -198,6 +204,11 @@ func (c *Client) deliverOutcome(op boardcontent.Op, out boardcontent.OpOutcome) 
 	switch {
 	case out.Nack != nil:
 		c.sendNack(op.OpID, *out.Nack)
+		if out.Nack.Reason == boardcontent.ReasonForbidden {
+			ctx, cancel := context.WithTimeout(c.ctx, c.hub.cfg.BusTimeout)
+			defer cancel()
+			c.recheckMembership(ctx)
+		}
 	case out.Replayed && out.Event != nil:
 		c.enqueueJSON("marshal replayed event failed", protocol.EventEnvelope(*out.Event))
 	}

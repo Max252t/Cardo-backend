@@ -159,9 +159,13 @@ func (b *Board) Apply(ctx context.Context, userID, _ uuid.UUID, op boardcontent.
 	}
 	m, member := b.members[userID]
 	switch {
-	case b.deleted || !member:
+	case b.deleted:
 		b.mu.Unlock()
 		return boardcontent.OpOutcome{}, domain.ErrNotFound
+	case !member:
+		nack := boardcontent.Nack{Reason: boardcontent.ReasonForbidden, AtSeq: b.seq, Message: "not a member of this board"}
+		b.mu.Unlock()
+		return boardcontent.OpOutcome{Nack: &nack}, nil
 	case !m.Role.AtLeast(domain.RoleEditor):
 		nack := boardcontent.Nack{Reason: boardcontent.ReasonForbidden, AtSeq: b.seq, Message: "forbidden"}
 		b.mu.Unlock()
@@ -226,4 +230,13 @@ func (b *Board) Events(_ context.Context, userID, _ uuid.UUID, afterSeq int64) (
 		page.HasMore = true
 	}
 	return page, nil
+}
+
+func (b *Board) SetRole(userID uuid.UUID, role domain.Role) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if m, ok := b.members[userID]; ok {
+		m.Role = role
+		b.members[userID] = m
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/jwtauth"
+	"github.com/Max252t/Cardo-backend/internal/members"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/presence"
 	"github.com/Max252t/Cardo-backend/internal/presencestore"
@@ -19,15 +20,17 @@ import (
 )
 
 type realtimeStack struct {
-	hub    *realtime.Hub
-	boards *boards.Service
-	stop   func()
+	hub     *realtime.Hub
+	boards  *boards.Service
+	members *members.Service
+	stop    func()
 }
 
 func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client, jwt *jwtauth.Manager, logger *slog.Logger) (*realtimeStack, error) {
 	broker, presenceStore := newTransport(rdb, logger)
 	publisher := pubsub.NewEventPublisher(broker)
 	boardService := boards.NewService(store, boards.WithPublisher(publisher), boards.WithLogger(logger))
+	memberService := members.NewService(store, members.WithPublisher(publisher), members.WithLogger(logger))
 	processor := ops.NewProcessor(store, ops.WithPublisher(publisher), ops.WithLogger(logger))
 	clock := realtime.SystemClock{}
 	presenceService := presence.New(presenceStore, pubsub.NewPresenceNotifier(broker), clock, uuid.NewString())
@@ -51,8 +54,9 @@ func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client
 	go pubsub.Pump(broker, hub.Dispatch)
 	go hub.Run(runCtx)
 	return &realtimeStack{
-		hub:    hub,
-		boards: boardService,
+		hub:     hub,
+		boards:  boardService,
+		members: memberService,
 		stop: func() {
 			cancel()
 			if err := broker.Close(); err != nil {

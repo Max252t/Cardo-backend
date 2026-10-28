@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Max252t/Cardo-backend/internal/boardcontent"
+	"github.com/Max252t/Cardo-backend/internal/clock"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
@@ -21,7 +22,7 @@ type Timer interface {
 }
 
 type Clock interface {
-	Now() time.Time
+	clock.Clock
 	NewTicker(d time.Duration) Ticker
 	NewTimer(d time.Duration) Timer
 }

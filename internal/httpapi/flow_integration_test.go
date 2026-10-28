@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/boards"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/jwtauth"
+	"github.com/Max252t/Cardo-backend/internal/members"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
@@ -57,6 +59,7 @@ type flow struct {
 	pool   *pgxpool.Pool
 	store  *storage.Store
 	clock  *flowClock
+	logs   *syncBuffer
 }
 
 func newFlow(t *testing.T) *flow {
@@ -74,6 +77,7 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 	pool := testutil.NewMigratedPool(t)
 	store := storage.New(pool)
 	clock := &flowClock{now: time.Now()}
+	logs := &syncBuffer{}
 	var limiter auth.LoginLimiter = ratelimit.NewMemoryLimiter(5, time.Minute, clock)
 	readiness := map[string]httpapi.Checker{"postgres": store}
 	if withRedis {
@@ -101,10 +105,12 @@ func buildFlow(t *testing.T, withRedis bool) *flow {
 		Tokens:    jwtm,
 		Users:     users.NewService(store),
 		Boards:    boards.NewService(store),
+		Members:   members.NewService(store),
+		Logger:    slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Readiness: readiness,
 	})
 	require.NoError(t, err)
-	return &flow{router: router, pool: pool, store: store, clock: clock}
+	return &flow{router: router, pool: pool, store: store, clock: clock, logs: logs}
 }
 
 func (f *flow) do(t *testing.T, method, path, body, token string) response {
@@ -513,4 +519,21 @@ func TestFlowSnapshotAndEventLog(t *testing.T) {
 
 	bob := f.register(t, "bob")
 	f.expectError(t, http.MethodGet, "/api/boards/"+boardID.String(), "", bob.access, http.StatusNotFound, httpapi.CodeNotFound)
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

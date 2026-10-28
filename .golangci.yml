@@ -31,6 +31,8 @@ linters:
             - "**/internal/boardcontent/**"
             - "**/internal/boardtx/**"
             - "**/internal/boardevents/**"
+            - "**/internal/clock/**"
+            - "**/internal/secrets/**"
           allow:
             - $gostd
             - github.com/google/uuid
@@ -39,6 +41,8 @@ linters:
             - github.com/Max252t/Cardo-backend/internal/boardcontent
             - github.com/Max252t/Cardo-backend/internal/boardtx
             - github.com/Max252t/Cardo-backend/internal/boardevents
+            - github.com/Max252t/Cardo-backend/internal/clock
+            - github.com/Max252t/Cardo-backend/internal/secrets
         use-cases:
           list-mode: strict
           files:
@@ -48,6 +52,7 @@ linters:
             - "**/internal/users/**"
             - "**/internal/auth/**"
             - "**/internal/presence/**"
+            - "**/internal/members/**"
           allow:
             - $gostd
             - github.com/google/uuid
@@ -56,6 +61,8 @@ linters:
             - github.com/Max252t/Cardo-backend/internal/boardcontent
             - github.com/Max252t/Cardo-backend/internal/boardtx
             - github.com/Max252t/Cardo-backend/internal/boardevents
+            - github.com/Max252t/Cardo-backend/internal/clock
+            - github.com/Max252t/Cardo-backend/internal/secrets
         production-code:
           list-mode: lax
           files:

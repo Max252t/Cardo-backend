@@ -103,6 +103,7 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		Boards:         rt.boards,
 		Claims:         jwtManager,
 		Sockets:        rt.hub,
+		Members:        rt.members,
 		Readiness:      readiness,
 		ShuttingDown:   lc.draining.Load,
 		TrustedProxies: cfg.TrustedProxies,

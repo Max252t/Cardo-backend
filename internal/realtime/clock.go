@@ -1,11 +1,13 @@
 package realtime
 
-import "time"
+import (
+	"time"
 
-type SystemClock struct{}
+	"github.com/Max252t/Cardo-backend/internal/clock"
+)
 
-func (SystemClock) Now() time.Time {
-	return time.Now()
+type SystemClock struct {
+	clock.System
 }
 
 func (SystemClock) NewTicker(d time.Duration) Ticker {

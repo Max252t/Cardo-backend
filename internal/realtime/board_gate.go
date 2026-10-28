@@ -145,6 +145,7 @@ func (h *Hub) register(c *Client) (bool, error) {
 func (h *Hub) heartbeat(ctx context.Context) {
 	for _, boardID := range h.boardIDs() {
 		h.heartbeatBoard(ctx, boardID)
+		h.revalidateMembers(ctx, boardID)
 	}
 }
 

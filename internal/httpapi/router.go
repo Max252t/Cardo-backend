@@ -67,6 +67,7 @@ type Deps struct {
 	MaxBodyBytes   int64
 	Claims         ClaimsParser
 	Sockets        BoardSockets
+	Members        MemberService
 }
 
 type handlers struct {
@@ -80,6 +81,7 @@ type handlers struct {
 	clock        Clock
 	claims       ClaimsParser
 	sockets      BoardSockets
+	members      MemberService
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -100,6 +102,7 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		clock:        d.Clock,
 		claims:       d.Claims,
 		sockets:      d.Sockets,
+		members:      d.Members,
 	}
 
 	r := gin.New()
@@ -152,8 +155,23 @@ func (h *handlers) registerRoutes(r *gin.Engine) {
 	user.GET("/boards/:"+boardIDParam, h.getBoard)
 	user.DELETE("/boards/:"+boardIDParam, h.deleteBoard)
 	user.GET("/boards/:"+boardIDParam+"/events", h.boardEvents)
+	if h.members != nil {
+		h.registerMemberRoutes(user)
+	}
 
 	if h.sockets != nil && h.claims != nil {
 		r.GET("/ws/boards/:"+boardIDParam, h.connectBoardSocket)
 	}
+}
+
+func (h *handlers) registerMemberRoutes(user *gin.RouterGroup) {
+	board := "/boards/:" + boardIDParam
+	user.GET(board+"/members", h.listMembers)
+	user.POST(board+"/members", h.addMember)
+	user.PATCH(board+"/members/:"+memberIDParam, h.changeMemberRole)
+	user.DELETE(board+"/members/:"+memberIDParam, h.removeMember)
+	user.POST(board+"/invites", h.createInvite)
+	user.GET(board+"/invites", h.listInvites)
+	user.DELETE(board+"/invites/:"+inviteIDParam, h.revokeInvite)
+	user.POST("/invites/:"+tokenParam+"/accept", h.acceptInvite)
 }

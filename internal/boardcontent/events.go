@@ -149,3 +149,28 @@ type BoardRenamed struct {
 type BoardDeleted struct {
 	ActorID uuid.UUID `json:"actor_id"`
 }
+
+const (
+	EventMemberAdded       = "member.added"
+	EventMemberRoleChanged = "member.role_changed"
+	EventMemberRemoved     = "member.removed"
+)
+
+type MemberAdded struct {
+	UserID      uuid.UUID   `json:"user_id"`
+	DisplayName string      `json:"display_name"`
+	AvatarColor string      `json:"avatar_color"`
+	Role        domain.Role `json:"role"`
+	ActorID     uuid.UUID   `json:"actor_id"`
+}
+
+type MemberRoleChanged struct {
+	UserID  uuid.UUID   `json:"user_id"`
+	Role    domain.Role `json:"role"`
+	ActorID uuid.UUID   `json:"actor_id"`
+}
+
+type MemberRemoved struct {
+	UserID  uuid.UUID `json:"user_id"`
+	ActorID uuid.UUID `json:"actor_id"`
+}

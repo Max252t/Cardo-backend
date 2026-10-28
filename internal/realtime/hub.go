@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -90,20 +89,15 @@ func NewHub(deps Deps, cfg Config, opts ...HubOption) (*Hub, error) {
 		clock:      deps.Clock,
 		logger:     deps.Logger,
 		cfg:        cfg.withDefaults(),
-		hooks:      make(map[string][]EventHook),
+		hooks:      defaultHooks(),
 		baseCtx:    ctx,
 		cancelBase: cancel,
 		rooms:      make(map[uuid.UUID]*room),
 	}
-	h.hooks[boardcontent.EventBoardDeleted] = []EventHook{closeBoardOnDelete}
 	for _, opt := range opts {
 		opt(h)
 	}
 	return h, nil
-}
-
-func closeBoardOnDelete(h *Hub, boardID uuid.UUID, _ protocol.Envelope) {
-	h.CloseBoard(boardID, protocol.CloseBoardDeleted, "board deleted")
 }
 
 func (h *Hub) Dispatch(channel string, payload []byte) {
@@ -294,4 +288,11 @@ func presenceSubject(env protocol.Envelope) uuid.UUID {
 		}
 	}
 	return uuid.Nil
+}
+
+func (h *Hub) Role(boardID, userID uuid.UUID) domain.Role {
+	for _, c := range h.clientsWhere(boardID, ofUser(userID)) {
+		return c.Role()
+	}
+	return ""
 }

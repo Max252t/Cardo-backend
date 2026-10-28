@@ -38,3 +38,20 @@ func TestBoardMember(t *testing.T) {
 	_, err = store.BoardMember(ctx, board.ID, owner.ID)
 	require.ErrorIs(t, err, domain.ErrNotFound)
 }
+
+func TestDatabaseRejectsASecondOwnerRow(t *testing.T) {
+	pool := testutil.NewMigratedPool(t)
+	store := storage.New(pool)
+	owner := testutil.CreateUser(t, store, "owner-index@example.com")
+	other := testutil.CreateUser(t, store, "other-index@example.com")
+	board := createBoard(t, store, owner.ID, "Single owner")
+	ctx := context.Background()
+
+	_, err := pool.Exec(ctx, `INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'owner')`, board.ID, other.ID)
+	require.Error(t, err)
+
+	_, err = pool.Exec(ctx, `INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'editor')`, board.ID, other.ID)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `UPDATE board_members SET role = 'owner' WHERE board_id = $1 AND user_id = $2`, board.ID, other.ID)
+	require.Error(t, err)
+}

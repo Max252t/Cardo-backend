@@ -2,6 +2,7 @@ package boardtx
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -62,3 +63,26 @@ type Cards interface {
 	ArchiveCard(ctx context.Context, id, actorID uuid.UUID) (domain.Card, error)
 	RerankCards(ctx context.Context, columnID uuid.UUID, items []domain.RankedItem) error
 }
+
+type Roster interface {
+	UserByEmail(ctx context.Context, email string) (domain.User, error)
+	AddMember(ctx context.Context, userID uuid.UUID, role domain.Role) (domain.Member, error)
+	SetMemberRole(ctx context.Context, userID uuid.UUID, role domain.Role) (domain.Member, error)
+	RemoveMember(ctx context.Context, userID uuid.UUID) error
+	Member(ctx context.Context, userID uuid.UUID) (domain.Member, error)
+}
+
+type Invites interface {
+	InsertInvite(ctx context.Context, inv domain.Invite) error
+	InviteByHash(ctx context.Context, tokenHash string) (domain.Invite, error)
+	RevokeInvite(ctx context.Context, id uuid.UUID, at time.Time) error
+	ConsumeInvite(ctx context.Context, id uuid.UUID) error
+}
+
+type AdminTx interface {
+	Tx
+	Roster
+	Invites
+}
+
+type AdminFunc func(ctx context.Context, tx AdminTx) error

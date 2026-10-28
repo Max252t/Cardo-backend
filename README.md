@@ -142,10 +142,22 @@ The WebSocket endpoint authenticates and checks board membership before upgradin
 | GET | `/api/boards/:id/events?after_seq=N` | Event delta (`410 Gone` outside retention) |
 | GET / POST | `/api/boards/:id/members` | List / add members |
 | PATCH / DELETE | `/api/boards/:id/members/:userId` | Change role / remove |
-| POST / DELETE | `/api/boards/:id/invites[/:inviteId]` | Create / revoke invite |
+| GET / POST | `/api/boards/:id/invites` | List active invites (owner, no tokens) / create invite |
+| DELETE | `/api/boards/:id/invites/:inviteId` | Revoke invite |
 | POST | `/api/invites/:token/accept` | Accept invite |
 | GET | `/healthz`, `/readyz` | Liveness / readiness |
 | GET | `/metrics` | Prometheus metrics |
+
+### Members and invites
+
+All member changes are made under the board lock and produce `member.added`, `member.role_changed` and `member.removed` events with a `seq`; they are published after commit and delivered over WebSocket like any other event. Live connections react immediately: a removed member is closed with `4003`, and a role change updates the cached role of that user's open connections.
+
+- `GET /members` (any member): `user_id`, `display_name`, `avatar_color`, `role`, `joined_at`.
+- `POST /members` (owner), body `{"email", "role": "editor|viewer"}`: adds an existing user. Unknown email is `404 not_found`, already a member is `409 already_member`. Non-owners get `403` (or `404` when not a member) before any email lookup, so they cannot probe which emails are registered.
+- `PATCH /members/:userId` (owner), body `{"role": "editor|viewer"}`: targeting the owner is `403 forbidden`, the same as for removal, because ownership transfer is not supported; setting the current role is a no-op without an event.
+- `DELETE /members/:userId`: the owner removes anyone except themselves; any other member may remove only themselves (leave). The owner cannot leave (`403`).
+- `POST /invites` (owner), body `{"role": "editor|viewer", "expires_in": seconds (default 7 days, max 30 days), "max_uses": 1..100 (default 1)}`: returns `id`, `role`, `expires_at`, `max_uses`, `uses` and the raw `token` exactly once. The token is 256 bits of randomness, base64url; only its SHA-256 is stored.
+- `POST /api/invites/:token/accept` (any user): atomically checks the invite is not revoked, not expired, has uses left and that the board is not deleted, then consumes one use and adds the member (`member.added`). Unknown token is `404`; a revoked, expired or exhausted invite is `410 invite_unavailable`. A user who is already a member gets `200` with the board and their current role even when the invite has since been revoked, has expired or is exhausted: the membership check comes first, so no use is consumed and no event is emitted. The token travels in the path, so request logs record only the route template (`/api/invites/:token/accept`).
 
 ## Development workflow
 

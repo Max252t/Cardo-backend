@@ -387,7 +387,10 @@ func TestMemberRoleMatrix(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.role), func(t *testing.T) {
-			user := f.member(t, tt.role)
+			user := f.owner
+			if tt.role != domain.RoleOwner {
+				user = f.member(t, tt.role)
+			}
 			out := f.applyAs(t, user.ID, uuid.New(), boardcontent.OpCardCreate, boardcontent.CardCreate{CardID: uuid.New(), ColumnID: col, Title: "x"})
 			if tt.forbidden {
 				require.NotNil(t, out.Nack)
