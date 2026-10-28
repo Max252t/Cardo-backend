@@ -60,6 +60,9 @@ type Config struct {
 	ProcessedOpsRetention time.Duration
 	RetentionBatchSize    int
 
+	RESTRateLimit float64
+	RESTRateBurst int
+
 	LogLevel slog.Level
 }
 
@@ -104,6 +107,9 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		EventsKeepMin:         p.integer("EVENTS_KEEP_MIN", 1000),
 		ProcessedOpsRetention: p.duration("PROCESSED_OPS_RETENTION", 24*time.Hour),
 		RetentionBatchSize:    p.integer("RETENTION_BATCH_SIZE", 1000),
+
+		RESTRateLimit: p.float("REST_RATE_LIMIT", 20),
+		RESTRateBurst: p.integer("REST_RATE_BURST", 40),
 
 		LogLevel: p.level("LOG_LEVEL", slog.LevelInfo),
 	}
@@ -163,6 +169,7 @@ func (c Config) validate() error {
 	errs = append(errs, c.validateRedis()...)
 	errs = append(errs, c.validateMetricsAddr()...)
 	errs = append(errs, c.validateRetention()...)
+	errs = append(errs, c.validateRESTRateLimit()...)
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
 	}
@@ -226,6 +233,19 @@ func (p *parser) int32(key string, def int32) int32 {
 		return def
 	}
 	return int32(n)
+}
+
+func (p *parser) float(key string, def float64) float64 {
+	v, ok := p.raw(key)
+	if !ok {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		p.errs = append(p.errs, fmt.Errorf("%s: invalid number %q", key, v))
+		return def
+	}
+	return f
 }
 
 func (p *parser) boolean(key string, def bool) bool {
@@ -311,6 +331,19 @@ func (c Config) validateRetention() []error {
 	}
 	if c.RetentionBatchSize <= 0 {
 		errs = append(errs, errors.New("RETENTION_BATCH_SIZE must be positive"))
+	}
+	return errs
+}
+
+const maxRESTRateLimit = 1_000_000
+
+func (c Config) validateRESTRateLimit() []error {
+	var errs []error
+	if c.RESTRateLimit < 0 || c.RESTRateLimit > maxRESTRateLimit {
+		errs = append(errs, fmt.Errorf("REST_RATE_LIMIT must be between 0 and %d (0 disables the limit)", maxRESTRateLimit))
+	}
+	if c.RESTRateLimit > 0 && c.RESTRateBurst < 1 {
+		errs = append(errs, errors.New("REST_RATE_BURST must be at least 1 when REST_RATE_LIMIT is enabled"))
 	}
 	return errs
 }

@@ -378,3 +378,43 @@ func TestLoadFromRejectsInvalidRetention(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadFromRESTRateLimit(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFrom(env(baseEnv(nil)))
+	require.NoError(t, err)
+	assert.InDelta(t, 20.0, cfg.RESTRateLimit, 0)
+	assert.Equal(t, 40, cfg.RESTRateBurst)
+
+	cfg, err = config.LoadFrom(env(baseEnv(map[string]string{"REST_RATE_LIMIT": "2.5", "REST_RATE_BURST": "5"})))
+	require.NoError(t, err)
+	assert.InDelta(t, 2.5, cfg.RESTRateLimit, 0)
+	assert.Equal(t, 5, cfg.RESTRateBurst)
+
+	cfg, err = config.LoadFrom(env(baseEnv(map[string]string{"REST_RATE_LIMIT": "0", "REST_RATE_BURST": "0"})))
+	require.NoError(t, err)
+	assert.Zero(t, cfg.RESTRateLimit)
+}
+
+func TestLoadFromRejectsInvalidRESTRateLimit(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		env  map[string]string
+		want string
+	}{
+		"negative rate":     {map[string]string{"REST_RATE_LIMIT": "-1"}, "REST_RATE_LIMIT"},
+		"not a number":      {map[string]string{"REST_RATE_LIMIT": "fast"}, "REST_RATE_LIMIT"},
+		"nan":               {map[string]string{"REST_RATE_LIMIT": "NaN"}, "REST_RATE_LIMIT"},
+		"huge rate":         {map[string]string{"REST_RATE_LIMIT": "1e9"}, "REST_RATE_LIMIT"},
+		"zero burst":        {map[string]string{"REST_RATE_BURST": "0"}, "REST_RATE_BURST"},
+		"non integer burst": {map[string]string{"REST_RATE_BURST": "1.5"}, "REST_RATE_BURST"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := config.LoadFrom(env(baseEnv(tt.env)))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
