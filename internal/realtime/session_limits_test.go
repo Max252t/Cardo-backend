@@ -183,7 +183,7 @@ func TestOversizedMessageDoesNotReachTheProcessor(t *testing.T) {
 	c.HandshakeSnapshot()
 	opID := uuid.NewString()
 	big := `{"v":1,"type":"op.card.create","op_id":"` + opID + `","payload":{"title":"` + strings.Repeat("x", 70<<10) + `"}}`
-	c.SendRaw([]byte(big))
+	_ = c.WriteMessage(websocket.TextMessage, []byte(big))
 	_, err := c.Next()
 	require.Error(t, err)
 	waitConnections(t, inst, env.Board.ID, 0)
