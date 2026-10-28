@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -69,6 +70,8 @@ type Deps struct {
 	Sockets        BoardSockets
 	Members        MemberService
 	Metrics        Metrics
+	RateLimiter    RateLimiter
+	RateMetrics    RateLimitMetrics
 }
 
 type handlers struct {
@@ -83,6 +86,10 @@ type handlers struct {
 	claims       ClaimsParser
 	sockets      BoardSockets
 	members      MemberService
+	limiter      RateLimiter
+	rateMetrics  RateLimitMetrics
+
+	limiterWarnedAt atomic.Int64
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -104,6 +111,8 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		claims:       d.Claims,
 		sockets:      d.Sockets,
 		members:      d.Members,
+		limiter:      d.RateLimiter,
+		rateMetrics:  d.RateMetrics,
 	}
 
 	r := gin.New()
@@ -132,6 +141,9 @@ func withDefaults(d Deps) Deps {
 	if d.Metrics == nil {
 		d.Metrics = nopMetrics{}
 	}
+	if d.RateMetrics == nil {
+		d.RateMetrics = nopRateLimitMetrics{}
+	}
 	if d.MaxBodyBytes <= 0 {
 		d.MaxBodyBytes = defaultMaxBodyBytes
 	}
@@ -152,6 +164,9 @@ func (h *handlers) registerRoutes(r *gin.Engine) {
 	public.POST("/refresh", h.refresh)
 
 	user := api.Group("", h.authMiddleware())
+	if h.limiter != nil {
+		user.Use(h.rateLimitMiddleware())
+	}
 	user.POST("/auth/logout", h.logout)
 	user.GET("/me", h.getMe)
 	user.PATCH("/me", h.patchMe)
