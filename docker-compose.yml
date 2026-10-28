@@ -5,13 +5,17 @@ x-api: &api
   build:
     context: .
   restart: unless-stopped
-  env_file: .env
+  env_file:
+    - path: .env
+      required: false
   environment: &api-env
     SINGLE_INSTANCE: "false"
     REDIS_URL: redis://redis:6379/0
     DATABASE_URL: postgres://cardo:${POSTGRES_PASSWORD:-cardo}@postgres:5432/cardo?sslmode=disable
     HTTP_ADDR: ":8080"
-    TRUSTED_PROXIES: 172.28.0.0/16
+    TRUSTED_PROXIES: 172.28.0.10/32
+    METRICS_ADDR: ":9091"
+    JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
   depends_on:
     postgres:
       condition: service_healthy
@@ -43,6 +47,12 @@ services:
     restart: unless-stopped
     ports:
       - "8080:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/nginx-health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -51,7 +61,8 @@ services:
       api-2:
         condition: service_healthy
     networks:
-      - cardo
+      cardo:
+        ipv4_address: 172.28.0.10
 
   postgres:
     image: postgres:16-alpine
@@ -103,7 +114,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -119,6 +130,7 @@ networks:
     ipam:
       config:
         - subnet: 172.28.0.0/16
+          ip_range: 172.28.1.0/24
 
 volumes:
   postgres-data:

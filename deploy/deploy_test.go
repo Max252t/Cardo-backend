@@ -91,36 +91,45 @@ func nginxSize(t *testing.T, v string) int64 {
 	return n * unit
 }
 
-func TestNginxDisablesAccessLogForInviteAcceptance(t *testing.T) {
+func TestNginxSilencesEveryInvitePath(t *testing.T) {
 	t.Parallel()
 	conf := read(t, "deploy/nginx.conf")
-	loc := block(t, conf, `location ~ ^/api/invites/.+/accept$`)
+	loc := block(t, conf, "location ^~ /api/invites/")
 
 	assert.Equal(t, "off", directive(t, loc, "access_log"))
-	assert.Contains(t, loc, "proxy_pass http://api;")
+	assert.Equal(t, "/dev/null crit", directive(t, loc, "error_log"))
+	assert.Equal(t, "http://api", directive(t, loc, "proxy_pass"))
+	assert.NotContains(t, loc, "proxy_set_header", "proxy settings must be inherited from the server block")
 }
 
-func TestNginxInviteLocationMatchesAcceptPathsOnly(t *testing.T) {
+func TestNginxInvitePrefixCoversAcceptPathsAndTheirVariants(t *testing.T) {
 	t.Parallel()
 	conf := read(t, "deploy/nginx.conf")
-	m := regexp.MustCompile(`location ~ (\S+) \{`).FindAllStringSubmatch(conf, -1)
-	require.Len(t, m, 1)
-	re := regexp.MustCompile(m[0][1])
+	m := regexp.MustCompile(`location \^~ (\S+) \{`).FindStringSubmatch(conf)
+	require.NotNil(t, m)
 
-	assert.True(t, re.MatchString("/api/invites/abc123/accept"))
-	assert.True(t, re.MatchString("/api/invites/Zm9v-_ba/accept"))
-	assert.False(t, re.MatchString("/api/boards/abc/events"))
-	assert.False(t, re.MatchString("/api/invites//accept"))
-	assert.False(t, re.MatchString("/api/invites/abc123"))
+	for _, path := range []string{
+		"/api/invites/abc123/accept",
+		"/api/invites/abc123/accept/",
+		"/api/invites/Zm9v-_ba/accept",
+		"/api/invites/abc123",
+		"/api/invites/abc123/anything/else",
+	} {
+		assert.True(t, strings.HasPrefix(path, m[1]), path)
+	}
+	other := "/api/boards/abc/invites/def"
+	assert.False(t, strings.HasPrefix(other, m[1]))
+	assert.Empty(t, regexp.MustCompile(`location ~`).FindAllString(conf, -1), "regex locations would be skipped by ^~ but could leak tokens elsewhere")
 }
 
 func TestNginxInviteLocationAlsoCoversTrailingSlashRedirect(t *testing.T) {
-	t.Skip("BUG: GET/POST /api/invites/<token>/accept/ matches 'location /' (access_log on), so nginx logs the token in $uri while the API answers it with a 307 redirect to the slashless path")
+	t.Parallel()
 	conf := read(t, "deploy/nginx.conf")
-	m := regexp.MustCompile(`location ~ (\S+) \{`).FindStringSubmatch(conf)
+	m := regexp.MustCompile(`location \^~ (\S+) \{`).FindStringSubmatch(conf)
 	require.NotNil(t, m)
 
-	assert.True(t, regexp.MustCompile(m[1]).MatchString("/api/invites/abc123/accept/"))
+	slash := "/api/invites/abc123/accept/"
+	assert.True(t, strings.HasPrefix(slash, m[1]))
 }
 
 func TestNginxAccessLogFormatNeverContainsTheRawRequestLine(t *testing.T) {
@@ -200,9 +209,16 @@ func TestNginxBalancesRoundRobinAcrossBothReplicas(t *testing.T) {
 	conf := read(t, "deploy/nginx.conf")
 	up := block(t, conf, "upstream api")
 
-	assert.Contains(t, up, "server api-1:8080")
-	assert.Contains(t, up, "server api-2:8080")
-	assert.Equal(t, 2, strings.Count(up, "server api-"))
+	compose := read(t, "docker-compose.yml")
+	for _, svc := range []string{"api-1", "api-2"} {
+		ip := regexp.MustCompile(`(?s)
+  ` + svc + `:
+.*?ipv4_address:\s*(\S+)`).FindStringSubmatch(compose)
+		require.NotNil(t, ip, svc)
+		assert.Contains(t, up, "server "+ip[1]+":8080", svc)
+	}
+	assert.Equal(t, 2, strings.Count(up, "server "))
+	assert.NotRegexp(t, `server [a-z]`, up, "upstream hosts must be IPs so nginx starts while a replica is down")
 	for _, sticky := range []string{"ip_hash", "hash ", "least_conn", "sticky", "random", "least_time"} {
 		assert.NotContains(t, up, sticky)
 	}
@@ -217,7 +233,8 @@ func TestNginxRetriesFailedUpstreamsOnTheOtherReplica(t *testing.T) {
 	tries, err := strconv.Atoi(directive(t, conf, "proxy_next_upstream_tries"))
 	require.NoError(t, err)
 	assert.Equal(t, 2, tries)
-	assert.LessOrEqual(t, nginxDuration(t, directive(t, conf, "proxy_connect_timeout")), 5*time.Second)
+	assert.LessOrEqual(t, nginxDuration(t, directive(t, conf, "proxy_connect_timeout")), time.Second)
+	assert.Contains(t, directive(t, conf, "proxy_next_upstream"), "http_503")
 }
 
 func TestNginxHidesVersionAndRoutesEverythingElseToTheAPI(t *testing.T) {
@@ -236,7 +253,11 @@ func TestComposeRunsReplicasInMultiInstanceMode(t *testing.T) {
 
 	assert.Contains(t, api[1], `SINGLE_INSTANCE: "false"`)
 	assert.Contains(t, api[1], "REDIS_URL: redis://redis:6379/0")
-	assert.Contains(t, api[1], "env_file: .env")
+	assert.Regexp(t, `env_file:
+\s+- path: \.env
+\s+required: false`, api[1])
+	assert.Contains(t, api[1], "JWT_SECRET: ${JWT_SECRET:?")
+	assert.Contains(t, api[1], `METRICS_ADDR: ":9091"`)
 	assert.NotContains(t, compose, `SINGLE_INSTANCE: "true"`)
 }
 
@@ -290,12 +311,18 @@ func TestComposeKeepsMonitoringOptionalAndLocal(t *testing.T) {
 	}
 }
 
-func TestComposeTrustedProxiesCoverTheComposeNetwork(t *testing.T) {
+func TestComposeTrustsOnlyTheNginxContainer(t *testing.T) {
 	t.Parallel()
 	compose := read(t, "docker-compose.yml")
 	subnet := regexp.MustCompile(`subnet:\s*(\S+)`).FindStringSubmatch(compose)
 	require.NotNil(t, subnet)
 	network, err := netip.ParsePrefix(subnet[1])
+	require.NoError(t, err)
+	nginx := regexp.MustCompile(`(?s)
+  nginx:
+.*?ipv4_address:\s*(\S+)`).FindStringSubmatch(compose)
+	require.NotNil(t, nginx)
+	nginxIP, err := netip.ParseAddr(nginx[1])
 	require.NoError(t, err)
 
 	composeProxies := regexp.MustCompile(`TRUSTED_PROXIES:\s*(\S+)`).FindStringSubmatch(compose)
@@ -303,14 +330,19 @@ func TestComposeTrustedProxiesCoverTheComposeNetwork(t *testing.T) {
 	for _, raw := range []string{composeProxies[1], envFile(t)["TRUSTED_PROXIES"]} {
 		trusted, err := netip.ParsePrefix(raw)
 		require.NoError(t, err)
-		assert.True(t, trusted.Contains(network.Addr()), raw)
-		assert.LessOrEqual(t, trusted.Bits(), network.Bits(), raw)
+		assert.True(t, trusted.Contains(nginxIP), raw)
+		assert.Equal(t, 32, trusted.Bits(), raw)
 	}
 	for _, ip := range regexp.MustCompile(`ipv4_address:\s*(\S+)`).FindAllStringSubmatch(compose, -1) {
 		addr, err := netip.ParseAddr(ip[1])
 		require.NoError(t, err)
 		assert.True(t, network.Contains(addr), ip[1])
 	}
+	rng := regexp.MustCompile(`ip_range:\s*(\S+)`).FindStringSubmatch(compose)
+	require.NotNil(t, rng)
+	pool, err := netip.ParsePrefix(rng[1])
+	require.NoError(t, err)
+	assert.False(t, pool.Contains(nginxIP), "dynamic pool must not overlap the static addresses")
 }
 
 func TestEnvExampleLoadsAsAValidConfiguration(t *testing.T) {
