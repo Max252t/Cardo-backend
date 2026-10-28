@@ -101,9 +101,29 @@ func TestRunRepeatsOnTheConfiguredInterval(t *testing.T) {
 	assert.GreaterOrEqual(t, store.eventCalls.Load(), int32(3))
 }
 
+type gatedWaiter struct {
+	waits chan time.Duration
+	allow chan struct{}
+}
+
+func newGatedWaiter() *gatedWaiter {
+	return &gatedWaiter{waits: make(chan time.Duration, 16), allow: make(chan struct{})}
+}
+
+func (w *gatedWaiter) Wait(ctx context.Context, d time.Duration) error {
+	w.waits <- d
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-w.allow:
+		return nil
+	}
+}
+
 func TestRunRunsOnceImmediatelyThenWaitsForTheInterval(t *testing.T) {
 	store := &scriptedStore{}
-	svc, err := retention.New(store, validConfig())
+	waiter := newGatedWaiter()
+	svc, err := retention.New(store, validConfig(), retention.WithWaiter(waiter))
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,10 +132,14 @@ func TestRunRunsOnceImmediatelyThenWaitsForTheInterval(t *testing.T) {
 		svc.Run(ctx)
 		close(done)
 	}()
-	require.Eventually(t, func() bool { return store.opCalls.Load() == 1 }, 5*time.Second, 5*time.Millisecond)
-	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, validConfig().Interval, <-waiter.waits)
 	assert.EqualValues(t, 1, store.opCalls.Load())
 	assert.EqualValues(t, 1, store.eventCalls.Load())
+
+	waiter.allow <- struct{}{}
+	<-waiter.waits
+	assert.EqualValues(t, 2, store.opCalls.Load())
+	assert.EqualValues(t, 2, store.eventCalls.Load())
 	cancel()
 	<-done
 }

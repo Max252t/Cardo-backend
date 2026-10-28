@@ -25,13 +25,24 @@ type Store interface {
 	PruneProcessedOps(ctx context.Context, olderThan time.Time, batch int) (Result, error)
 }
 
+const (
+	ResultOK          = "ok"
+	ResultSkipped     = "skipped"
+	ResultFailed      = "failed"
+	ResultInterrupted = "interrupted"
+
+	MaxBatchSize = 50000
+)
+
 type Metrics interface {
 	Deleted(table string, n int64)
+	Ran(table, result string)
 }
 
 type nopMetrics struct{}
 
 func (nopMetrics) Deleted(string, int64) {}
+func (nopMetrics) Ran(string, string)    {}
 
 type Config struct {
 	Interval              time.Duration
@@ -41,25 +52,51 @@ type Config struct {
 	BatchSize             int
 }
 
-func (c Config) Validate() error {
-	var errs []error
+const (
+	FieldInterval              = "interval"
+	FieldEventsRetention       = "events_retention"
+	FieldProcessedOpsRetention = "processed_ops_retention"
+	FieldEventsKeepMin         = "events_keep_min"
+	FieldBatchSize             = "batch_size"
+)
+
+type Problem struct {
+	Field   string
+	Message string
+}
+
+func (c Config) WindowProblems() []Problem {
+	if c.EventsRetention < c.ProcessedOpsRetention {
+		return []Problem{{FieldEventsRetention, "must not be shorter than the processed ops retention"}}
+	}
+	return nil
+}
+
+func (c Config) Problems() []Problem {
+	var out []Problem
 	if c.Interval <= 0 {
-		errs = append(errs, errors.New("interval must be positive"))
+		out = append(out, Problem{FieldInterval, "must be positive"})
 	}
 	if c.EventsRetention <= 0 {
-		errs = append(errs, errors.New("events retention must be positive"))
+		out = append(out, Problem{FieldEventsRetention, "must be positive"})
 	}
 	if c.ProcessedOpsRetention <= 0 {
-		errs = append(errs, errors.New("processed ops retention must be positive"))
+		out = append(out, Problem{FieldProcessedOpsRetention, "must be positive"})
 	}
-	if c.EventsRetention < c.ProcessedOpsRetention {
-		errs = append(errs, errors.New("events retention must not be shorter than processed ops retention"))
-	}
+	out = append(out, c.WindowProblems()...)
 	if c.EventsKeepMin < 0 {
-		errs = append(errs, errors.New("events keep minimum must not be negative"))
+		out = append(out, Problem{FieldEventsKeepMin, "must not be negative"})
 	}
-	if c.BatchSize <= 0 {
-		errs = append(errs, errors.New("batch size must be positive"))
+	if c.BatchSize <= 0 || c.BatchSize > MaxBatchSize {
+		out = append(out, Problem{FieldBatchSize, fmt.Sprintf("must be between 1 and %d", MaxBatchSize)})
+	}
+	return out
+}
+
+func (c Config) Validate() error {
+	var errs []error
+	for _, p := range c.Problems() {
+		errs = append(errs, fmt.Errorf("%s %s", p.Field, p.Message))
 	}
 	return errors.Join(errs...)
 }
@@ -67,6 +104,7 @@ func (c Config) Validate() error {
 type Service struct {
 	store   Store
 	clock   clock.Clock
+	waiter  clock.Waiter
 	logger  *slog.Logger
 	metrics Metrics
 	cfg     Config
@@ -78,6 +116,14 @@ func WithClock(c clock.Clock) Option {
 	return func(s *Service) {
 		if c != nil {
 			s.clock = c
+		}
+	}
+}
+
+func WithWaiter(w clock.Waiter) Option {
+	return func(s *Service) {
+		if w != nil {
+			s.waiter = w
 		}
 	}
 }
@@ -108,6 +154,7 @@ func New(store Store, cfg Config, opts ...Option) (*Service, error) {
 	s := &Service{
 		store:   store,
 		clock:   clock.System{},
+		waiter:  clock.System{},
 		logger:  slog.New(slog.DiscardHandler),
 		metrics: nopMetrics{},
 		cfg:     cfg,
@@ -119,16 +166,11 @@ func New(store Store, cfg Config, opts ...Option) (*Service, error) {
 }
 
 func (s *Service) Run(ctx context.Context) {
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-		}
+	for ctx.Err() == nil {
 		s.RunOnce(ctx)
-		timer.Reset(s.cfg.Interval)
+		if err := s.waiter.Wait(ctx, s.cfg.Interval); err != nil {
+			return
+		}
 	}
 }
 
@@ -149,12 +191,16 @@ func (s *Service) job(ctx context.Context, table string, run func() (Result, err
 	}
 	switch {
 	case err != nil && ctx.Err() != nil:
+		s.metrics.Ran(table, ResultInterrupted)
 		s.logger.Info("retention job interrupted", slog.String("table", table), slog.Int64("deleted", res.Deleted))
 	case err != nil:
+		s.metrics.Ran(table, ResultFailed)
 		s.logger.Error("retention job failed", slog.String("table", table), slog.Int64("deleted", res.Deleted), slog.Any("error", err))
 	case res.Skipped:
+		s.metrics.Ran(table, ResultSkipped)
 		s.logger.Debug("retention job skipped, another instance holds the lock", slog.String("table", table))
 	default:
+		s.metrics.Ran(table, ResultOK)
 		s.logger.Info("retention job finished", slog.String("table", table), slog.Int64("deleted", res.Deleted))
 	}
 }

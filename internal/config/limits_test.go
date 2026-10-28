@@ -13,14 +13,17 @@ import (
 func TestLoadFromRetentionBoundaries(t *testing.T) {
 	t.Parallel()
 	valid := map[string]map[string]string{
-		"equal retentions":        {"EVENTS_RETENTION": "24h", "PROCESSED_OPS_RETENTION": "24h"},
-		"events just longer":      {"EVENTS_RETENTION": "24h1s", "PROCESSED_OPS_RETENTION": "24h"},
-		"batch one":               {"RETENTION_BATCH_SIZE": "1"},
-		"keep min zero":           {"EVENTS_KEEP_MIN": "0"},
-		"tiny interval":           {"RETENTION_INTERVAL": "1ms"},
-		"disabled with defaults":  {"RETENTION_ENABLED": "false"},
-		"very long retention":     {"EVENTS_RETENTION": "8760h", "PROCESSED_OPS_RETENTION": "8760h"},
-		"minutes and seconds mix": {"RETENTION_INTERVAL": "1h30m15s"},
+		"equal retentions":         {"EVENTS_RETENTION": "24h", "PROCESSED_OPS_RETENTION": "24h"},
+		"events just longer":       {"EVENTS_RETENTION": "24h1s", "PROCESSED_OPS_RETENTION": "24h"},
+		"batch one":                {"RETENTION_BATCH_SIZE": "1"},
+		"keep min zero":            {"EVENTS_KEEP_MIN": "0"},
+		"tiny interval":            {"RETENTION_INTERVAL": "1ms"},
+		"disabled with defaults":   {"RETENTION_ENABLED": "false"},
+		"very long retention":      {"EVENTS_RETENTION": "8760h", "PROCESSED_OPS_RETENTION": "8760h"},
+		"minutes and seconds mix":  {"RETENTION_INTERVAL": "1h30m15s"},
+		"disabled with bad values": {"RETENTION_ENABLED": "false", "RETENTION_BATCH_SIZE": "0", "DB_MAX_CONNS": "2"},
+		"batch at the cap":         {"RETENTION_BATCH_SIZE": "50000"},
+		"three connections":        {"DB_MAX_CONNS": "3"},
 	}
 	for name, extra := range valid {
 		t.Run("valid "+name, func(t *testing.T) {
@@ -30,15 +33,17 @@ func TestLoadFromRetentionBoundaries(t *testing.T) {
 		})
 	}
 	invalid := map[string]map[string]string{
-		"events just shorter":     {"EVENTS_RETENTION": "23h59m59s"},
-		"negative events":         {"EVENTS_RETENTION": "-1h"},
-		"negative ops retention":  {"PROCESSED_OPS_RETENTION": "-1h"},
-		"negative interval":       {"RETENTION_INTERVAL": "-1m"},
-		"negative batch":          {"RETENTION_BATCH_SIZE": "-5"},
-		"fractional batch":        {"RETENTION_BATCH_SIZE": "1.5"},
-		"non numeric keep min":    {"EVENTS_KEEP_MIN": "many"},
-		"invalid enabled flag":    {"RETENTION_ENABLED": "maybe"},
-		"disabled but misconfigd": {"RETENTION_ENABLED": "false", "RETENTION_BATCH_SIZE": "0"},
+		"events just shorter":           {"EVENTS_RETENTION": "23h59m59s"},
+		"negative events":               {"EVENTS_RETENTION": "-1h"},
+		"negative ops retention":        {"PROCESSED_OPS_RETENTION": "-1h"},
+		"negative interval":             {"RETENTION_INTERVAL": "-1m"},
+		"negative batch":                {"RETENTION_BATCH_SIZE": "-5"},
+		"fractional batch":              {"RETENTION_BATCH_SIZE": "1.5"},
+		"non numeric keep min":          {"EVENTS_KEEP_MIN": "many"},
+		"invalid enabled flag":          {"RETENTION_ENABLED": "maybe"},
+		"disabled but windows inverted": {"RETENTION_ENABLED": "false", "EVENTS_RETENTION": "1h"},
+		"batch over the cap":            {"RETENTION_BATCH_SIZE": "50001"},
+		"too few connections":           {"DB_MAX_CONNS": "2"},
 	}
 	for name, extra := range invalid {
 		t.Run("invalid "+name, func(t *testing.T) {

@@ -55,6 +55,16 @@ func (f *fakeStore) PruneProcessedOps(_ context.Context, olderThan time.Time, ba
 type metricsSpy struct {
 	mu      sync.Mutex
 	deleted map[string]int64
+	runs    map[string]string
+}
+
+func (m *metricsSpy) Ran(table, result string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.runs == nil {
+		m.runs = map[string]string{}
+	}
+	m.runs[table] = result
 }
 
 func (m *metricsSpy) Deleted(table string, n int64) {
@@ -147,4 +157,29 @@ func TestNewValidatesConfig(t *testing.T) {
 	}
 	_, err := retention.New(nil, validConfig())
 	assert.Error(t, err)
+}
+
+func TestRunOnceReportsRunResults(t *testing.T) {
+	store := &fakeStore{eventsErr: errors.New("db down"), processed: retention.Result{Skipped: true}}
+	spy := &metricsSpy{}
+	svc, err := retention.New(store, validConfig(), retention.WithMetrics(spy))
+	require.NoError(t, err)
+
+	svc.RunOnce(context.Background())
+	assert.Equal(t, retention.ResultFailed, spy.runs[retention.TableBoardEvents])
+	assert.Equal(t, retention.ResultSkipped, spy.runs[retention.TableProcessedOps])
+
+	store.eventsErr = nil
+	store.processed = retention.Result{}
+	svc.RunOnce(context.Background())
+	assert.Equal(t, retention.ResultOK, spy.runs[retention.TableBoardEvents])
+	assert.Equal(t, retention.ResultOK, spy.runs[retention.TableProcessedOps])
+}
+
+func TestConfigRejectsOversizedBatch(t *testing.T) {
+	cfg := validConfig()
+	cfg.BatchSize = retention.MaxBatchSize + 1
+	assert.Error(t, cfg.Validate())
+	cfg.BatchSize = retention.MaxBatchSize
+	assert.NoError(t, cfg.Validate())
 }

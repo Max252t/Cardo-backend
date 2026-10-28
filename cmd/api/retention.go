@@ -16,13 +16,7 @@ func startRetention(ctx context.Context, cfg config.Config, store *storage.Store
 		logger.Info("retention jobs are disabled")
 		return func() {}, nil
 	}
-	svc, err := retention.New(store, retention.Config{
-		Interval:              cfg.RetentionInterval,
-		EventsRetention:       cfg.EventsRetention,
-		EventsKeepMin:         cfg.EventsKeepMin,
-		ProcessedOpsRetention: cfg.ProcessedOpsRetention,
-		BatchSize:             cfg.RetentionBatchSize,
-	}, retention.WithLogger(logger), retention.WithMetrics(obs.retention))
+	svc, err := retention.New(store, cfg.RetentionConfig(), retention.WithLogger(logger), retention.WithMetrics(obs.retention))
 	if err != nil {
 		return nil, fmt.Errorf("build retention: %w", err)
 	}

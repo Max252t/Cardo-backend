@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Max252t/Cardo-backend/internal/retention"
 )
 
 const (
-	minJWTSecretLength = 32
-	minDBConns         = 2
+	minJWTSecretLength  = 32
+	minDBConns          = 2
+	minRetentionDBConns = 3
 )
 
 type Config struct {
@@ -312,38 +315,53 @@ func (c Config) validateMetricsAddr() []error {
 	return nil
 }
 
+var retentionEnvNames = map[string]string{
+	retention.FieldInterval:              "RETENTION_INTERVAL",
+	retention.FieldEventsRetention:       "EVENTS_RETENTION",
+	retention.FieldProcessedOpsRetention: "PROCESSED_OPS_RETENTION",
+	retention.FieldEventsKeepMin:         "EVENTS_KEEP_MIN",
+	retention.FieldBatchSize:             "RETENTION_BATCH_SIZE",
+}
+
+func (c Config) RetentionConfig() retention.Config {
+	return retention.Config{
+		Interval:              c.RetentionInterval,
+		EventsRetention:       c.EventsRetention,
+		EventsKeepMin:         c.EventsKeepMin,
+		ProcessedOpsRetention: c.ProcessedOpsRetention,
+		BatchSize:             c.RetentionBatchSize,
+	}
+}
+
 func (c Config) validateRetention() []error {
+	rc := c.RetentionConfig()
+	problems := rc.WindowProblems()
+	if c.RetentionEnabled {
+		problems = rc.Problems()
+	}
 	var errs []error
-	if c.RetentionInterval <= 0 {
-		errs = append(errs, errors.New("RETENTION_INTERVAL must be positive"))
+	for _, p := range problems {
+		errs = append(errs, fmt.Errorf("%s %s", retentionEnvNames[p.Field], p.Message))
 	}
-	if c.EventsRetention <= 0 {
-		errs = append(errs, errors.New("EVENTS_RETENTION must be positive"))
-	}
-	if c.ProcessedOpsRetention <= 0 {
-		errs = append(errs, errors.New("PROCESSED_OPS_RETENTION must be positive"))
-	}
-	if c.EventsRetention < c.ProcessedOpsRetention {
-		errs = append(errs, errors.New("EVENTS_RETENTION must not be shorter than PROCESSED_OPS_RETENTION"))
-	}
-	if c.EventsKeepMin < 0 {
-		errs = append(errs, errors.New("EVENTS_KEEP_MIN must not be negative"))
-	}
-	if c.RetentionBatchSize <= 0 {
-		errs = append(errs, errors.New("RETENTION_BATCH_SIZE must be positive"))
+	if c.RetentionEnabled && c.DBMaxConns < minRetentionDBConns {
+		errs = append(errs, fmt.Errorf("DB_MAX_CONNS must be at least %d when RETENTION_ENABLED=true", minRetentionDBConns))
 	}
 	return errs
 }
 
-const maxRESTRateLimit = 1_000_000
+const (
+	minRESTRateLimit = 0.001
+	maxRESTRateLimit = 1_000_000
+	maxRESTRateBurst = 1_000_000
+)
 
 func (c Config) validateRESTRateLimit() []error {
 	var errs []error
-	if c.RESTRateLimit < 0 || c.RESTRateLimit > maxRESTRateLimit {
-		errs = append(errs, fmt.Errorf("REST_RATE_LIMIT must be between 0 and %d (0 disables the limit)", maxRESTRateLimit))
+	if c.RESTRateLimit != 0 && (c.RESTRateLimit < minRESTRateLimit || c.RESTRateLimit > maxRESTRateLimit) {
+		errs = append(errs, fmt.Errorf("REST_RATE_LIMIT must be 0 (disabled) or between %g and %d", minRESTRateLimit, maxRESTRateLimit))
 	}
-	if c.RESTRateLimit > 0 && c.RESTRateBurst < 1 {
-		errs = append(errs, errors.New("REST_RATE_BURST must be at least 1 when REST_RATE_LIMIT is enabled"))
+	if c.RESTRateLimit > 0 && (c.RESTRateBurst < 1 || c.RESTRateBurst > maxRESTRateBurst) {
+		errs = append(errs, fmt.Errorf("REST_RATE_BURST must be between 1 and %d when REST_RATE_LIMIT is enabled", maxRESTRateBurst))
 	}
 	return errs
 }

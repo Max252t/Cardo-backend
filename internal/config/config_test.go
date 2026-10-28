@@ -402,12 +402,14 @@ func TestLoadFromRejectsInvalidRESTRateLimit(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		"negative rate":     {map[string]string{"REST_RATE_LIMIT": "-1"}, "REST_RATE_LIMIT"},
-		"not a number":      {map[string]string{"REST_RATE_LIMIT": "fast"}, "REST_RATE_LIMIT"},
-		"nan":               {map[string]string{"REST_RATE_LIMIT": "NaN"}, "REST_RATE_LIMIT"},
-		"huge rate":         {map[string]string{"REST_RATE_LIMIT": "1e9"}, "REST_RATE_LIMIT"},
-		"zero burst":        {map[string]string{"REST_RATE_BURST": "0"}, "REST_RATE_BURST"},
-		"non integer burst": {map[string]string{"REST_RATE_BURST": "1.5"}, "REST_RATE_BURST"},
+		"negative rate":      {map[string]string{"REST_RATE_LIMIT": "-1"}, "REST_RATE_LIMIT"},
+		"not a number":       {map[string]string{"REST_RATE_LIMIT": "fast"}, "REST_RATE_LIMIT"},
+		"nan":                {map[string]string{"REST_RATE_LIMIT": "NaN"}, "REST_RATE_LIMIT"},
+		"huge rate":          {map[string]string{"REST_RATE_LIMIT": "1e9"}, "REST_RATE_LIMIT"},
+		"zero burst":         {map[string]string{"REST_RATE_BURST": "0"}, "REST_RATE_BURST"},
+		"non integer burst":  {map[string]string{"REST_RATE_BURST": "1.5"}, "REST_RATE_BURST"},
+		"rate below minimum": {map[string]string{"REST_RATE_LIMIT": "0.0005"}, "REST_RATE_LIMIT"},
+		"burst over the cap": {map[string]string{"REST_RATE_BURST": "1000001"}, "REST_RATE_BURST"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
