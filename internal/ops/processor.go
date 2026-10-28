@@ -59,6 +59,7 @@ func NewProcessor(store Store, opts ...Option) *Processor {
 
 func (p *Processor) Apply(ctx context.Context, userID, boardID uuid.UUID, op boardcontent.Op) (boardcontent.OpOutcome, error) {
 	if op.OpID == uuid.Nil {
+		p.metrics.ObserveOp(metricType(op.Type), boardcontent.ReasonValidation, 0)
 		return boardcontent.OpOutcome{}, domain.NewValidationError("op_id", "is required")
 	}
 	start := time.Now()

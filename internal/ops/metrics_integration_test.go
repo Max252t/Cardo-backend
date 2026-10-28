@@ -144,7 +144,7 @@ func TestMetricsReportEveryNackReason(t *testing.T) {
 	assert.Contains(t, reasons, boardcontent.ReasonVersionConflict)
 }
 
-func TestMetricsReportReplayedNackWithItsOriginalReason(t *testing.T) {
+func TestMetricsReportReplayedNackAsReplayed(t *testing.T) {
 	f := newFixture(t)
 	w := buildWorld(t, f)
 	spy := f.withSpy()
@@ -155,11 +155,13 @@ func TestMetricsReportReplayedNackWithItsOriginalReason(t *testing.T) {
 	again := f.applyAs(t, f.owner.ID, opID, boardcontent.OpCardMove, payload)
 
 	require.True(t, again.Replayed)
-	for _, o := range spy.all() {
+	seen := spy.all()
+	require.Len(t, seen, 2)
+	assert.Equal(t, boardcontent.ReasonVersionConflict, seen[0].result)
+	assert.Equal(t, ops.ResultReplayed, seen[1].result)
+	for _, o := range seen {
 		assert.Equal(t, boardcontent.OpCardMove, o.opType)
-		assert.Equal(t, boardcontent.ReasonVersionConflict, o.result)
 	}
-	assert.Len(t, spy.all(), 2)
 }
 
 func TestMetricsReportForbiddenForViewerAndOutsider(t *testing.T) {
@@ -237,17 +239,20 @@ func TestMetricsReportNotFoundErrorForUnknownBoard(t *testing.T) {
 	assert.Equal(t, boardcontent.ReasonNotFound, spy.last(t).result)
 }
 
-func TestMetricsAreNotObservedForNilOpID(t *testing.T) {
+func TestMetricsCountNilOpIDAsValidation(t *testing.T) {
 	f := newFixture(t)
 	spy := f.withSpy()
 
 	_, err := f.proc.Apply(context.Background(), f.owner.ID, f.board.ID, boardcontent.Op{Type: boardcontent.OpColumnCreate})
 
 	require.Error(t, err)
-	assert.Empty(t, spy.all())
+	seen := spy.all()
+	require.Len(t, seen, 1)
+	assert.Equal(t, boardcontent.OpColumnCreate, seen[0].opType)
+	assert.Equal(t, boardcontent.ReasonValidation, seen[0].result)
 }
 
-func TestMetricsReportInternalOnCanceledContext(t *testing.T) {
+func TestMetricsReportCanceledOnCanceledContext(t *testing.T) {
 	f := newFixture(t)
 	spy := f.withSpy()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -258,7 +263,7 @@ func TestMetricsReportInternalOnCanceledContext(t *testing.T) {
 
 	require.Error(t, err)
 	got := spy.last(t)
-	assert.Equal(t, ops.ResultInternal, got.result)
+	assert.Equal(t, ops.ResultCanceled, got.result)
 	assert.Equal(t, boardcontent.OpColumnCreate, got.opType)
 }
 

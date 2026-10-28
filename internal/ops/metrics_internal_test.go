@@ -49,7 +49,7 @@ func TestProcessorReportsResultAndBoundedType(t *testing.T) {
 		{"known type forbidden", boardcontent.OpCardCreate, domain.ErrForbidden, observedOp{boardcontent.OpCardCreate, boardcontent.ReasonForbidden}},
 		{"unknown type not found", "attacker.supplied", domain.ErrNotFound, observedOp{TypeUnknown, boardcontent.ReasonNotFound}},
 		{"validation", boardcontent.OpCardEdit, domain.NewValidationError("title", "bad"), observedOp{boardcontent.OpCardEdit, boardcontent.ReasonValidation}},
-		{"other error", boardcontent.OpCardMove, assert.AnError, observedOp{boardcontent.OpCardMove, ResultInternal}},
+		{"other error", boardcontent.OpCardMove, assert.AnError, observedOp{boardcontent.OpCardMove, boardcontent.ReasonInternal}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

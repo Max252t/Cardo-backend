@@ -60,9 +60,10 @@ func TestMetricResultFromErrors(t *testing.T) {
 		{"wrapped forbidden", fmt.Errorf("check: %w", domain.ErrForbidden), boardcontent.ReasonForbidden},
 		{"validation", domain.NewValidationError("title", "bad"), boardcontent.ReasonValidation},
 		{"wrapped validation", fmt.Errorf("payload: %w", domain.NewValidationError("title", "bad")), boardcontent.ReasonValidation},
-		{"context canceled", context.Canceled, ResultInternal},
-		{"deadline", context.DeadlineExceeded, ResultInternal},
-		{"arbitrary", assert.AnError, ResultInternal},
+		{"context canceled", context.Canceled, ResultCanceled},
+		{"wrapped deadline", fmt.Errorf("lock: %w", context.DeadlineExceeded), ResultCanceled},
+		{"deadline", context.DeadlineExceeded, ResultCanceled},
+		{"arbitrary", assert.AnError, boardcontent.ReasonInternal},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -75,7 +76,7 @@ func TestMetricResultFromErrors(t *testing.T) {
 func TestMetricResultErrorWinsOverOutcome(t *testing.T) {
 	t.Parallel()
 	out := boardcontent.OpOutcome{Event: &domain.Event{}, Replayed: true, Nack: &boardcontent.Nack{Reason: boardcontent.ReasonVersionConflict}}
-	assert.Equal(t, ResultInternal, metricResult(out, assert.AnError))
+	assert.Equal(t, boardcontent.ReasonInternal, metricResult(out, assert.AnError))
 }
 
 func TestMetricResultFromNackReasons(t *testing.T) {
@@ -88,7 +89,7 @@ func TestMetricResultFromNackReasons(t *testing.T) {
 		t.Run(reason, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, reason, metricResult(boardcontent.OpOutcome{Nack: &boardcontent.Nack{Reason: reason}}, nil))
-			assert.Equal(t, reason, metricResult(boardcontent.OpOutcome{Nack: &boardcontent.Nack{Reason: reason}, Replayed: true}, nil))
+			assert.Equal(t, ResultReplayed, metricResult(boardcontent.OpOutcome{Nack: &boardcontent.Nack{Reason: reason}, Replayed: true}, nil))
 		})
 	}
 }
@@ -108,7 +109,7 @@ func TestResultConstantsDoNotCollideWithNackReasons(t *testing.T) {
 	}
 	assert.NotContains(t, reasons, ResultApplied)
 	assert.NotContains(t, reasons, ResultReplayed)
-	assert.Equal(t, boardcontent.ReasonInternal, ResultInternal)
+	assert.NotContains(t, reasons, ResultCanceled)
 }
 
 func TestApplyWithoutMetricsOptionUsesNoopRecorder(t *testing.T) {
@@ -147,7 +148,7 @@ func TestApplyObservesExactlyOncePerCallWithNonNegativeDuration(t *testing.T) {
 	}
 }
 
-func TestApplyWithNilOpIDIsNotObserved(t *testing.T) {
+func TestApplyWithNilOpIDIsObservedAsValidation(t *testing.T) {
 	t.Parallel()
 	rec := &timedRecorder{}
 	p := NewProcessor(failingStore{}, WithMetrics(rec))
@@ -156,10 +157,11 @@ func TestApplyWithNilOpIDIsNotObserved(t *testing.T) {
 
 	var vErr *domain.ValidationError
 	require.ErrorAs(t, err, &vErr)
-	assert.Empty(t, rec.seen)
+	require.Len(t, rec.seen, 1)
+	assert.Equal(t, observedOp{boardcontent.OpCardCreate, boardcontent.ReasonValidation}, rec.seen[0])
 }
 
-func TestApplyObservesCanceledContextAsInternal(t *testing.T) {
+func TestApplyObservesCanceledContextAsCanceled(t *testing.T) {
 	t.Parallel()
 	rec := &timedRecorder{}
 	p := NewProcessor(failingStore{err: context.Canceled}, WithMetrics(rec))
@@ -168,5 +170,5 @@ func TestApplyObservesCanceledContextAsInternal(t *testing.T) {
 	_, err := p.Apply(context.Background(), uuid.New(), uuid.New(), op)
 
 	require.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, []observedOp{{boardcontent.OpCardMove, ResultInternal}}, rec.seen)
+	assert.Equal(t, []observedOp{{boardcontent.OpCardMove, ResultCanceled}}, rec.seen)
 }

@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 const (
 	ResultApplied  = "applied"
 	ResultReplayed = "replayed"
-	ResultInternal = "internal"
+	ResultCanceled = "canceled"
 	TypeUnknown    = "unknown"
 )
 
@@ -41,6 +42,10 @@ func metricType(opType string) string {
 func metricResult(out boardcontent.OpOutcome, err error) string {
 	var vErr *domain.ValidationError
 	switch {
+	case err == nil && out.Replayed:
+		return ResultReplayed
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return ResultCanceled
 	case errors.Is(err, domain.ErrNotFound):
 		return boardcontent.ReasonNotFound
 	case errors.Is(err, domain.ErrForbidden):
@@ -48,11 +53,9 @@ func metricResult(out boardcontent.OpOutcome, err error) string {
 	case errors.As(err, &vErr):
 		return boardcontent.ReasonValidation
 	case err != nil:
-		return ResultInternal
+		return boardcontent.ReasonInternal
 	case out.Nack != nil:
 		return out.Nack.Reason
-	case out.Replayed:
-		return ResultReplayed
 	}
 	return ResultApplied
 }
