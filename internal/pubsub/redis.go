@@ -100,6 +100,9 @@ func (b *RedisBroker) Unsubscribe(ctx context.Context, channels ...string) error
 }
 
 func (b *RedisBroker) change(ctx context.Context, kind string, send func(context.Context, ...string) error, channels []string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("redis %s: %w", kind, err)
+	}
 	pending := make(map[string]chan struct{}, len(channels))
 	defer func() {
 		for ch, w := range pending {
