@@ -28,6 +28,7 @@ import (
 )
 
 func main() {
+	exitOnHealthcheck()
 	cfg, cfgErr := config.Load()
 	logger := newLogger(cfg)
 	if cfgErr != nil {
@@ -84,7 +85,8 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		RefreshTTL: cfg.RefreshTokenTTL,
 	})
 
-	rt, err := newRealtimeStack(cfg, store, rdb, jwtManager, logger)
+	obs := newObservability(cfg)
+	rt, err := newRealtimeStack(cfg, store, rdb, jwtManager, obs, logger)
 	if err != nil {
 		return fmt.Errorf("build realtime: %w", err)
 	}
@@ -108,6 +110,8 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		ShuttingDown:   lc.draining.Load,
 		TrustedProxies: cfg.TrustedProxies,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
+		Metrics:        obs.http,
+		MetricsHandler: obs.handler,
 	})
 	if err != nil {
 		return err

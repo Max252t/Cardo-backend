@@ -26,12 +26,12 @@ type realtimeStack struct {
 	stop    func()
 }
 
-func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client, jwt *jwtauth.Manager, logger *slog.Logger) (*realtimeStack, error) {
+func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client, jwt *jwtauth.Manager, obs observability, logger *slog.Logger) (*realtimeStack, error) {
 	broker, presenceStore := newTransport(rdb, logger)
-	publisher := pubsub.NewEventPublisher(broker)
+	publisher := obs.wrap(pubsub.NewEventPublisher(broker))
 	boardService := boards.NewService(store, boards.WithPublisher(publisher), boards.WithLogger(logger))
 	memberService := members.NewService(store, members.WithPublisher(publisher), members.WithLogger(logger))
-	processor := ops.NewProcessor(store, ops.WithPublisher(publisher), ops.WithLogger(logger))
+	processor := ops.NewProcessor(store, ops.WithPublisher(publisher), ops.WithLogger(logger), ops.WithMetrics(obs.ops))
 	clock := realtime.SystemClock{}
 	presenceService := presence.New(presenceStore, pubsub.NewPresenceNotifier(broker), clock, uuid.NewString())
 
@@ -44,6 +44,7 @@ func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client
 		Tokens:   jwt,
 		Clock:    clock,
 		Logger:   logger,
+		Metrics:  obs.realtime,
 	}, realtime.Config{AllowedOrigins: cfg.WSAllowedOrigins})
 	if err != nil {
 		_ = broker.Close()
