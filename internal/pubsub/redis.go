@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -99,27 +100,40 @@ func (b *RedisBroker) Unsubscribe(ctx context.Context, channels ...string) error
 }
 
 func (b *RedisBroker) change(ctx context.Context, kind string, send func(context.Context, ...string) error, channels []string) error {
-	waiters := make(map[string]chan struct{}, len(channels))
+	pending := make(map[string]chan struct{}, len(channels))
+	defer func() {
+		for ch, w := range pending {
+			b.forget(kind, ch, w)
+		}
+	}()
 	for _, ch := range channels {
-		waiters[ch] = b.waiter(kind, ch)
+		pending[ch] = b.waiter(kind, ch)
 	}
 	if err := send(ctx, channels...); err != nil {
-		for ch, w := range waiters {
-			b.forget(kind, ch, w)
+		if b.closed() || errors.Is(err, redis.ErrClosed) {
+			return ErrClosed
 		}
 		return fmt.Errorf("redis %s: %w", kind, err)
 	}
-	for ch, w := range waiters {
+	for ch, w := range pending {
 		select {
 		case <-w:
 		case <-ctx.Done():
-			b.forget(kind, ch, w)
 			return fmt.Errorf("redis %s %s: %w", kind, ch, ctx.Err())
 		case <-b.done:
 			return ErrClosed
 		}
 	}
 	return nil
+}
+
+func (b *RedisBroker) closed() bool {
+	select {
+	case <-b.done:
+		return true
+	default:
+		return false
+	}
 }
 
 func (b *RedisBroker) Messages() <-chan Message {

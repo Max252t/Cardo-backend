@@ -439,7 +439,6 @@ func TestRedisBrokerUnsubscribeHonoursContextCancellationWhileWaiting(t *testing
 	proxy.pause()
 	ctx, cancel := context.WithCancel(base)
 	call := async(func() error { return b.Unsubscribe(ctx, ch) })
-	time.Sleep(50 * time.Millisecond)
 	cancel()
 
 	require.ErrorIs(t, call.result(t), context.Canceled)
@@ -494,7 +493,6 @@ func TestRedisBrokerCloseReleasesPendingUnsubscribe(t *testing.T) {
 
 	proxy.pause()
 	call := async(func() error { return b.Unsubscribe(ctx, ch) })
-	time.Sleep(50 * time.Millisecond)
 	require.NoError(t, b.Close())
 
 	require.ErrorIs(t, call.result(t), pubsub.ErrClosed)
@@ -510,7 +508,6 @@ func TestRedisBrokerCloseReleasesPendingSubscribe(t *testing.T) {
 
 	proxy.pause()
 	call := async(func() error { return b.Subscribe(ctx, newChannels(1)[0]) })
-	time.Sleep(50 * time.Millisecond)
 	require.NoError(t, b.Close())
 
 	require.ErrorIs(t, call.result(t), pubsub.ErrClosed)
