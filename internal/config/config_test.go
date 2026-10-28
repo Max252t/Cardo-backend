@@ -322,3 +322,59 @@ func TestLoadFromMetricsAddrIsIndependentFromSingleInstance(t *testing.T) {
 	assert.Equal(t, ":9091", cfg.MetricsAddr)
 	assert.True(t, cfg.SingleInstance)
 }
+
+func TestLoadFromRetentionDefaults(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFrom(env(baseEnv(nil)))
+	require.NoError(t, err)
+
+	assert.True(t, cfg.RetentionEnabled)
+	assert.Equal(t, time.Hour, cfg.RetentionInterval)
+	assert.Equal(t, 7*24*time.Hour, cfg.EventsRetention)
+	assert.Equal(t, 1000, cfg.EventsKeepMin)
+	assert.Equal(t, 24*time.Hour, cfg.ProcessedOpsRetention)
+	assert.Equal(t, 1000, cfg.RetentionBatchSize)
+}
+
+func TestLoadFromRetentionOverrides(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{
+		"RETENTION_ENABLED":       "false",
+		"RETENTION_INTERVAL":      "10m",
+		"EVENTS_RETENTION":        "48h",
+		"EVENTS_KEEP_MIN":         "0",
+		"PROCESSED_OPS_RETENTION": "48h",
+		"RETENTION_BATCH_SIZE":    "250",
+	})))
+	require.NoError(t, err)
+
+	assert.False(t, cfg.RetentionEnabled)
+	assert.Equal(t, 10*time.Minute, cfg.RetentionInterval)
+	assert.Equal(t, 48*time.Hour, cfg.EventsRetention)
+	assert.Equal(t, 0, cfg.EventsKeepMin)
+	assert.Equal(t, 48*time.Hour, cfg.ProcessedOpsRetention)
+	assert.Equal(t, 250, cfg.RetentionBatchSize)
+}
+
+func TestLoadFromRejectsInvalidRetention(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		env  map[string]string
+		want string
+	}{
+		"events shorter than ops": {map[string]string{"EVENTS_RETENTION": "12h"}, "EVENTS_RETENTION"},
+		"zero interval":           {map[string]string{"RETENTION_INTERVAL": "0s"}, "RETENTION_INTERVAL"},
+		"zero events retention":   {map[string]string{"EVENTS_RETENTION": "0s", "PROCESSED_OPS_RETENTION": "0s"}, "EVENTS_RETENTION"},
+		"negative keep min":       {map[string]string{"EVENTS_KEEP_MIN": "-1"}, "EVENTS_KEEP_MIN"},
+		"zero batch":              {map[string]string{"RETENTION_BATCH_SIZE": "0"}, "RETENTION_BATCH_SIZE"},
+		"bad duration":            {map[string]string{"RETENTION_INTERVAL": "soon"}, "RETENTION_INTERVAL"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := config.LoadFrom(env(baseEnv(tt.env)))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}

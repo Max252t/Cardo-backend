@@ -53,6 +53,13 @@ type Config struct {
 
 	MetricsAddr string
 
+	RetentionEnabled      bool
+	RetentionInterval     time.Duration
+	EventsRetention       time.Duration
+	EventsKeepMin         int
+	ProcessedOpsRetention time.Duration
+	RetentionBatchSize    int
+
 	LogLevel slog.Level
 }
 
@@ -90,7 +97,15 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		HashAcquireTimeout: p.duration("ARGON2_ACQUIRE_TIMEOUT", 2*time.Second),
 		WSAllowedOrigins:   p.list("WS_ALLOWED_ORIGINS"),
 		MetricsAddr:        p.str("METRICS_ADDR", ""),
-		LogLevel:           p.level("LOG_LEVEL", slog.LevelInfo),
+
+		RetentionEnabled:      p.boolean("RETENTION_ENABLED", true),
+		RetentionInterval:     p.duration("RETENTION_INTERVAL", time.Hour),
+		EventsRetention:       p.duration("EVENTS_RETENTION", 7*24*time.Hour),
+		EventsKeepMin:         p.integer("EVENTS_KEEP_MIN", 1000),
+		ProcessedOpsRetention: p.duration("PROCESSED_OPS_RETENTION", 24*time.Hour),
+		RetentionBatchSize:    p.integer("RETENTION_BATCH_SIZE", 1000),
+
+		LogLevel: p.level("LOG_LEVEL", slog.LevelInfo),
 	}
 	if len(p.errs) > 0 {
 		return Config{}, errors.Join(p.errs...)
@@ -147,6 +162,7 @@ func (c Config) validate() error {
 	}
 	errs = append(errs, c.validateRedis()...)
 	errs = append(errs, c.validateMetricsAddr()...)
+	errs = append(errs, c.validateRetention()...)
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
 	}
@@ -274,4 +290,27 @@ func (c Config) validateMetricsAddr() []error {
 		return []error{errors.New("METRICS_ADDR must differ from HTTP_ADDR")}
 	}
 	return nil
+}
+
+func (c Config) validateRetention() []error {
+	var errs []error
+	if c.RetentionInterval <= 0 {
+		errs = append(errs, errors.New("RETENTION_INTERVAL must be positive"))
+	}
+	if c.EventsRetention <= 0 {
+		errs = append(errs, errors.New("EVENTS_RETENTION must be positive"))
+	}
+	if c.ProcessedOpsRetention <= 0 {
+		errs = append(errs, errors.New("PROCESSED_OPS_RETENTION must be positive"))
+	}
+	if c.EventsRetention < c.ProcessedOpsRetention {
+		errs = append(errs, errors.New("EVENTS_RETENTION must not be shorter than PROCESSED_OPS_RETENTION"))
+	}
+	if c.EventsKeepMin < 0 {
+		errs = append(errs, errors.New("EVENTS_KEEP_MIN must not be negative"))
+	}
+	if c.RetentionBatchSize <= 0 {
+		errs = append(errs, errors.New("RETENTION_BATCH_SIZE must be positive"))
+	}
+	return errs
 }
