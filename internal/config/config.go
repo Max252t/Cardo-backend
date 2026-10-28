@@ -50,6 +50,8 @@ type Config struct {
 
 	WSAllowedOrigins []string
 
+	MetricsEnabled bool
+
 	LogLevel slog.Level
 }
 
@@ -86,6 +88,7 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		HashMaxConcurrent:  p.integer("ARGON2_MAX_CONCURRENT", 0),
 		HashAcquireTimeout: p.duration("ARGON2_ACQUIRE_TIMEOUT", 2*time.Second),
 		WSAllowedOrigins:   p.list("WS_ALLOWED_ORIGINS"),
+		MetricsEnabled:     p.boolean("METRICS_ENABLED", true),
 		LogLevel:           p.level("LOG_LEVEL", slog.LevelInfo),
 	}
 	if len(p.errs) > 0 {

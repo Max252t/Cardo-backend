@@ -59,6 +59,7 @@ func TestLoadFromDefaults(t *testing.T) {
 	assert.Equal(t, 5, cfg.LoginMaxFailures)
 	assert.Equal(t, time.Minute, cfg.LoginFailureWindow)
 	assert.Empty(t, cfg.WSAllowedOrigins)
+	assert.True(t, cfg.MetricsEnabled)
 	assert.Equal(t, slog.LevelInfo, cfg.LogLevel)
 }
 
@@ -270,4 +271,15 @@ func TestLoadFromRejectsInvalidSingleInstanceFlag(t *testing.T) {
 	_, err := config.LoadFrom(env(baseEnv(map[string]string{"SINGLE_INSTANCE": "maybe"})))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SINGLE_INSTANCE")
+}
+
+func TestLoadFromMetricsEnabledFlag(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "false"})))
+	require.NoError(t, err)
+	assert.False(t, cfg.MetricsEnabled)
+
+	_, err = config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "sometimes"})))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "METRICS_ENABLED")
 }
