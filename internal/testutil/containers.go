@@ -107,6 +107,11 @@ func requireDocker(t *testing.T) {
 	t.Skipf("docker is not available, skipping integration test: %v", err)
 }
 
+func RequireDocker(t *testing.T) {
+	t.Helper()
+	requireDocker(t)
+}
+
 func startPostgres(ctx context.Context) (testcontainers.Container, string, error) {
 	ctr, err := tcpostgres.Run(ctx, postgresImage, tcpostgres.BasicWaitStrategies())
 	if err != nil {
