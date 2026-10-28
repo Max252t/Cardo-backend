@@ -12,23 +12,30 @@ import (
 )
 
 type observability struct {
-	ops      ops.Metrics
-	realtime realtime.Metrics
-	http     httpapi.Metrics
-	handler  http.Handler
-	wrap     func(boardevents.Publisher) boardevents.Publisher
+	ops       ops.Metrics
+	realtime  realtime.Metrics
+	http      httpapi.Metrics
+	handler   http.Handler
+	collector *metrics.Collector
 }
 
 func newObservability(cfg config.Config) observability {
-	if !cfg.MetricsEnabled {
-		return observability{wrap: func(p boardevents.Publisher) boardevents.Publisher { return p }}
+	if cfg.MetricsAddr == "" {
+		return observability{}
 	}
 	c := metrics.New()
 	return observability{
-		ops:      c,
-		realtime: c,
-		http:     c,
-		handler:  c.Handler(),
-		wrap:     c.InstrumentPublisher,
+		ops:       c,
+		realtime:  c,
+		http:      c,
+		handler:   c.Handler(),
+		collector: c,
 	}
+}
+
+func (o observability) instrument(p boardevents.Publisher) boardevents.Publisher {
+	if o.collector == nil {
+		return p
+	}
+	return o.collector.InstrumentPublisher(p)
 }

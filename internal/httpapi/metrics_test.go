@@ -332,7 +332,7 @@ func TestMetricsCountConcurrentRequestsExactly(t *testing.T) {
 	assert.Len(t, h.spy.all(), n)
 }
 
-func TestMetricsSkipWebSocketUpgradeRequests(t *testing.T) {
+func TestMetricsRecordUpgradeRequestsThatWereNotHijacked(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{"websocket", "WebSocket", "WEBSOCKET"} {
 		h := newMetricsHarness(t, nil)
@@ -343,7 +343,7 @@ func TestMetricsSkipWebSocketUpgradeRequests(t *testing.T) {
 			"Authorization": "Bearer good",
 		})
 
-		assert.Empty(t, h.spy.all(), value)
+		assert.Len(t, h.spy.all(), 1, value)
 	}
 }
 
@@ -408,57 +408,37 @@ func TestMetricsSkipRealWebSocketSessions(t *testing.T) {
 	assert.Equal(t, "/healthz", seen[0].route)
 }
 
-func TestMetricsEndpointExposedOnlyWhenHandlerIsConfigured(t *testing.T) {
+func TestRouterDoesNotServeMetrics(t *testing.T) {
 	t.Parallel()
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("body"))
-	})
-	with := newMetricsHarness(t, func(d *httpapi.Deps) { d.MetricsHandler = handler })
-	without := newMetricsHarness(t, nil)
+	h := newMetricsHarness(t, nil)
 
-	rec := with.do(t, http.MethodGet, "/metrics", nil)
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "body", rec.Body.String())
-	assert.Equal(t, "/metrics", with.spy.only(t).route)
+	rec := h.do(t, http.MethodGet, "/metrics", nil)
 
-	rec = without.do(t, http.MethodGet, "/metrics", nil)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Equal(t, "unmatched", without.spy.only(t).route)
+	assert.Equal(t, "unmatched", h.spy.only(t).route)
 }
 
-func TestMetricsEndpointNeedsNoAuthentication(t *testing.T) {
+func TestTrailingSlashIsNotRedirectedAndIsMeteredAsUnmatched(t *testing.T) {
 	t.Parallel()
-	h := newMetricsHarness(t, func(d *httpapi.Deps) {
-		d.MetricsHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	})
+	h := newMetricsHarness(t, nil)
 
-	rec := h.do(t, http.MethodGet, "/metrics", nil)
+	rec := h.do(t, http.MethodPost, "/api/invites/"+inviteSecret+"/accept/", authed)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Empty(t, rec.Header().Get("Location"))
+	got := h.spy.only(t)
+	assert.Equal(t, "unmatched", got.route)
+	assert.Equal(t, http.StatusNotFound, got.status)
 }
 
-func TestMetricsEndpointRejectsOtherMethods(t *testing.T) {
+func TestFailedWebSocketUpgradeIsMetered(t *testing.T) {
 	t.Parallel()
-	h := newMetricsHarness(t, func(d *httpapi.Deps) {
-		d.MetricsHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	})
+	h := newMetricsHarness(t, nil)
 
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
-		rec := h.do(t, method, "/metrics", nil)
-		assert.Equal(t, http.StatusMethodNotAllowed, rec.Code, method)
-	}
-}
+	h.do(t, http.MethodGet, "/ws/boards/"+uuid.NewString(), map[string]string{"Upgrade": "websocket"})
 
-func TestMetricsEndpointStaysAvailableWhileDraining(t *testing.T) {
-	t.Parallel()
-	h := newMetricsHarness(t, func(d *httpapi.Deps) {
-		d.MetricsHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	})
-	h.draing = true
-
-	rec := h.do(t, http.MethodGet, "/metrics", nil)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
+	got := h.spy.only(t)
+	assert.NotEqual(t, http.StatusOK, got.status)
 }
 
 func TestRouterWithoutMetricsDependencyServesRequests(t *testing.T) {
@@ -474,7 +454,6 @@ func TestPrometheusCollectorBehindTheRouter(t *testing.T) {
 	collector := metrics.New()
 	h := newMetricsHarness(t, func(d *httpapi.Deps) {
 		d.Metrics = collector
-		d.MetricsHandler = collector.Handler()
 	})
 
 	h.do(t, http.MethodGet, "/healthz", nil)
@@ -482,7 +461,9 @@ func TestPrometheusCollectorBehindTheRouter(t *testing.T) {
 	h.do(t, http.MethodGet, "/api/boards/"+uuid.NewString()+"/events", nil)
 	h.do(t, "BREW", "/secret/"+inviteSecret, nil)
 	h.do(t, http.MethodGet, "/ws/boards/"+uuid.NewString(), map[string]string{"Upgrade": "websocket", "Authorization": "Bearer good"})
-	body := h.do(t, http.MethodGet, "/metrics", nil).Body.String()
+	rec := httptest.NewRecorder()
+	collector.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
+	body := rec.Body.String()
 
 	for _, want := range []string{
 		`http_request_duration_seconds_count{method="GET",route="/healthz",status="200"} 1`,
@@ -493,5 +474,5 @@ func TestPrometheusCollectorBehindTheRouter(t *testing.T) {
 		assert.Contains(t, body, want)
 	}
 	assert.NotContains(t, body, inviteSecret)
-	assert.NotContains(t, body, "/ws/boards")
+	assert.Contains(t, body, `route="/ws/boards/:id"`)
 }

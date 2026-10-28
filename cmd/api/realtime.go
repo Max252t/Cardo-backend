@@ -28,7 +28,7 @@ type realtimeStack struct {
 
 func newRealtimeStack(cfg config.Config, store *storage.Store, rdb *redis.Client, jwt *jwtauth.Manager, obs observability, logger *slog.Logger) (*realtimeStack, error) {
 	broker, presenceStore := newTransport(rdb, logger)
-	publisher := obs.wrap(pubsub.NewEventPublisher(broker))
+	publisher := obs.instrument(pubsub.NewEventPublisher(broker))
 	boardService := boards.NewService(store, boards.WithPublisher(publisher), boards.WithLogger(logger))
 	memberService := members.NewService(store, members.WithPublisher(publisher), members.WithLogger(logger))
 	processor := ops.NewProcessor(store, ops.WithPublisher(publisher), ops.WithLogger(logger), ops.WithMetrics(obs.ops))

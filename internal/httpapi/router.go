@@ -69,7 +69,6 @@ type Deps struct {
 	Sockets        BoardSockets
 	Members        MemberService
 	Metrics        Metrics
-	MetricsHandler http.Handler
 }
 
 type handlers struct {
@@ -84,7 +83,6 @@ type handlers struct {
 	claims       ClaimsParser
 	sockets      BoardSockets
 	members      MemberService
-	metricsHTTP  http.Handler
 }
 
 const defaultMaxBodyBytes = 1 << 20
@@ -106,11 +104,12 @@ func NewRouter(d Deps) (*gin.Engine, error) {
 		claims:       d.Claims,
 		sockets:      d.Sockets,
 		members:      d.Members,
-		metricsHTTP:  d.MetricsHandler,
 	}
 
 	r := gin.New()
 	r.HandleMethodNotAllowed = true
+	r.RedirectTrailingSlash = false
+	r.RedirectFixedPath = false
 	r.ContextWithFallback = true
 	if err := r.SetTrustedProxies(d.TrustedProxies); err != nil {
 		return nil, fmt.Errorf("httpapi: trusted proxies: %w", err)
@@ -145,9 +144,6 @@ func withDefaults(d Deps) Deps {
 func (h *handlers) registerRoutes(r *gin.Engine) {
 	r.GET("/healthz", h.healthz)
 	r.GET("/readyz", h.readyz)
-	if h.metricsHTTP != nil {
-		r.GET("/metrics", gin.WrapH(h.metricsHTTP))
-	}
 
 	api := r.Group("/api")
 	public := api.Group("/auth")

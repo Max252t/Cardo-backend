@@ -59,7 +59,7 @@ func TestLoadFromDefaults(t *testing.T) {
 	assert.Equal(t, 5, cfg.LoginMaxFailures)
 	assert.Equal(t, time.Minute, cfg.LoginFailureWindow)
 	assert.Empty(t, cfg.WSAllowedOrigins)
-	assert.True(t, cfg.MetricsEnabled)
+	assert.Empty(t, cfg.MetricsAddr)
 	assert.Equal(t, slog.LevelInfo, cfg.LogLevel)
 }
 
@@ -273,71 +273,52 @@ func TestLoadFromRejectsInvalidSingleInstanceFlag(t *testing.T) {
 	assert.Contains(t, err.Error(), "SINGLE_INSTANCE")
 }
 
-func TestLoadFromMetricsEnabledFlag(t *testing.T) {
-	t.Parallel()
-	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "false"})))
-	require.NoError(t, err)
-	assert.False(t, cfg.MetricsEnabled)
-
-	_, err = config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "sometimes"})))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "METRICS_ENABLED")
-}
-
-func TestLoadFromMetricsEnabledValues(t *testing.T) {
+func TestLoadFromMetricsAddr(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		raw  string
-		want bool
+		want string
 	}{
-		{"", true},
-		{"   ", true},
-		{"true", true},
-		{"TRUE", true},
-		{"True", true},
-		{"1", true},
-		{"t", true},
-		{"false", false},
-		{"FALSE", false},
-		{"False", false},
-		{"0", false},
-		{"f", false},
-		{" false ", false},
+		{"", ""},
+		{"   ", ""},
+		{":9091", ":9091"},
+		{"0.0.0.0:9091", "0.0.0.0:9091"},
+		{" 127.0.0.1:9100 ", "127.0.0.1:9100"},
+		{"[::1]:9091", "[::1]:9091"},
 	}
 	for _, tt := range tests {
 		t.Run("value "+tt.raw, func(t *testing.T) {
 			t.Parallel()
-			cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": tt.raw})))
+			cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ADDR": tt.raw})))
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, cfg.MetricsEnabled)
+			assert.Equal(t, tt.want, cfg.MetricsAddr)
 		})
 	}
 }
 
-func TestLoadFromRejectsInvalidMetricsEnabledValues(t *testing.T) {
+func TestLoadFromRejectsInvalidMetricsAddr(t *testing.T) {
 	t.Parallel()
-	for _, raw := range []string{"yes", "no", "on", "off", "enabled", "2", "-1"} {
+	for _, raw := range []string{"9091", "localhost", ":0", ":70000", ":abc", "host:", "a:b:c"} {
 		t.Run(raw, func(t *testing.T) {
 			t.Parallel()
-			_, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": raw})))
+			_, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ADDR": raw})))
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "METRICS_ENABLED")
+			assert.Contains(t, err.Error(), "METRICS_ADDR")
 		})
 	}
 }
 
-func TestLoadFromReportsMetricsAndOtherErrorsTogether(t *testing.T) {
+func TestLoadFromRejectsMetricsAddrEqualToHTTPAddr(t *testing.T) {
 	t.Parallel()
-	_, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "nope", "SINGLE_INSTANCE": "nope"})))
+	_, err := config.LoadFrom(env(baseEnv(map[string]string{"HTTP_ADDR": ":8080", "METRICS_ADDR": ":8080"})))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "METRICS_ENABLED")
-	assert.Contains(t, err.Error(), "SINGLE_INSTANCE")
+	assert.Contains(t, err.Error(), "METRICS_ADDR must differ from HTTP_ADDR")
 }
 
-func TestLoadFromMetricsFlagIsIndependentFromSingleInstance(t *testing.T) {
+func TestLoadFromMetricsAddrIsIndependentFromSingleInstance(t *testing.T) {
 	t.Parallel()
-	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ENABLED": "false", "SINGLE_INSTANCE": "true", "REDIS_URL": ""})))
+	cfg, err := config.LoadFrom(env(baseEnv(map[string]string{"METRICS_ADDR": ":9091", "SINGLE_INSTANCE": "true", "REDIS_URL": ""})))
 	require.NoError(t, err)
-	assert.False(t, cfg.MetricsEnabled)
+	assert.Equal(t, ":9091", cfg.MetricsAddr)
 	assert.True(t, cfg.SingleInstance)
 }

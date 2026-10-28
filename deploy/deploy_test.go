@@ -320,7 +320,7 @@ func TestEnvExampleLoadsAsAValidConfiguration(t *testing.T) {
 	cfg, err := config.LoadFrom(func(key string) string { return env[key] })
 
 	require.NoError(t, err)
-	assert.True(t, cfg.MetricsEnabled)
+	assert.Equal(t, ":9091", cfg.MetricsAddr)
 	assert.False(t, cfg.SingleInstance)
 	assert.Equal(t, int64(1048576), cfg.MaxBodyBytes)
 	assert.NotEmpty(t, cfg.RedisURL)
@@ -334,7 +334,7 @@ func TestPrometheusScrapesEachReplicaDirectly(t *testing.T) {
 	prom := read(t, "deploy/prometheus.yml")
 
 	assert.Contains(t, prom, "metrics_path: /metrics")
-	assert.Contains(t, prom, `targets: ["api-1:8080", "api-2:8080"]`)
+	assert.Contains(t, prom, `targets: ["api-1:9091", "api-2:9091"]`)
 	assert.NotContains(t, prom, "nginx")
 }
 

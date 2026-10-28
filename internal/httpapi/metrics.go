@@ -22,15 +22,19 @@ func metricsMiddleware(m Metrics) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		if isUpgrade(c.Request) {
+		status := c.Writer.Status()
+		if isUpgrade(c.Request) && status == http.StatusOK {
 			return
 		}
-		route := c.FullPath()
-		if route == "" {
-			route = unmatchedRoute
-		}
-		m.ObserveRequest(c.Request.Method, route, c.Writer.Status(), time.Since(start))
+		m.ObserveRequest(c.Request.Method, routeLabel(c), status, time.Since(start))
 	}
+}
+
+func routeLabel(c *gin.Context) string {
+	if route := c.FullPath(); route != "" {
+		return route
+	}
+	return unmatchedRoute
 }
 
 func isUpgrade(r *http.Request) bool {

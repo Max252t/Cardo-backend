@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -111,12 +112,12 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		TrustedProxies: cfg.TrustedProxies,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
 		Metrics:        obs.http,
-		MetricsHandler: obs.handler,
 	})
 	if err != nil {
 		return err
 	}
 
+	lc.metricsSrv = newMetricsServer(cfg, obs, logger)
 	return serve(ctx, stop, newHTTPServer(cfg, router, logger, lc.baseCtx), lc, cfg, logger)
 }
 
@@ -167,6 +168,7 @@ func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) 
 type lifecycle struct {
 	draining     atomic.Bool
 	closeSockets func(ctx context.Context) error
+	metricsSrv   *http.Server
 	baseCtx      context.Context
 	cancelBase   context.CancelFunc
 }
@@ -189,20 +191,53 @@ func newHTTPServer(cfg config.Config, handler http.Handler, logger *slog.Logger,
 	}
 }
 
+func newMetricsServer(cfg config.Config, obs observability, logger *slog.Logger) *http.Server {
+	if obs.handler == nil {
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", obs.handler)
+	return &http.Server{
+		Addr:              cfg.MetricsAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
+		ReadTimeout:       cfg.ReadTimeout,
+		WriteTimeout:      cfg.WriteTimeout,
+		IdleTimeout:       cfg.IdleTimeout,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+	}
+}
+
 func serve(ctx context.Context, stopSignals context.CancelFunc, srv *http.Server, lc *lifecycle, cfg config.Config, logger *slog.Logger) error {
-	serveErr := make(chan error, 1)
+	serveErr := make(chan error, 2)
+	var servers sync.WaitGroup
+	servers.Add(1)
 	go func() {
+		defer servers.Done()
 		logger.Info("http server listening", slog.String("addr", srv.Addr))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serveErr <- err
+			serveErr <- fmt.Errorf("http server: %w", err)
 		}
+	}()
+	if lc.metricsSrv != nil {
+		servers.Add(1)
+		go func() {
+			defer servers.Done()
+			logger.Info("metrics server listening", slog.String("addr", lc.metricsSrv.Addr))
+			if err := lc.metricsSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serveErr <- fmt.Errorf("metrics server: %w", err)
+			}
+		}()
+	}
+	go func() {
+		servers.Wait()
 		close(serveErr)
 	}()
 
 	select {
 	case err := <-serveErr:
 		if err != nil {
-			return fmt.Errorf("http server: %w", err)
+			return err
 		}
 		return nil
 	case <-ctx.Done():
@@ -225,11 +260,15 @@ func shutdown(srv *http.Server, lc *lifecycle, drain, timeout time.Duration, log
 		}
 	}
 	err := srv.Shutdown(shutdownCtx)
+	if lc.metricsSrv != nil {
+		err = errors.Join(err, lc.metricsSrv.Shutdown(shutdownCtx))
+	}
 	lc.cancelBase()
 	if err != nil {
 		logger.Warn("graceful shutdown timed out, cancelling in-flight requests", slog.Any("error", err))
-		if closeErr := srv.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
+		err = errors.Join(err, srv.Close())
+		if lc.metricsSrv != nil {
+			err = errors.Join(err, lc.metricsSrv.Close())
 		}
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}

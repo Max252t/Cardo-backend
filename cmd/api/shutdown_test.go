@@ -124,3 +124,20 @@ func TestShutdownContinuesWhenSocketsFailToClose(t *testing.T) {
 
 	require.NoError(t, shutdown(srv, lc, 0, time.Second, slog.New(slog.DiscardHandler)))
 }
+
+func TestShutdownAlsoStopsTheMetricsServer(t *testing.T) {
+	lc := newLifecycle()
+	mainSrv, _ := startTestServer(t, http.NotFoundHandler(), lc)
+	metricsSrv, metricsURL := startTestServer(t, http.NotFoundHandler(), lc)
+	lc.metricsSrv = metricsSrv
+
+	require.NoError(t, shutdown(mainSrv, lc, 0, time.Second, slog.New(slog.DiscardHandler)))
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, metricsURL, http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	require.Error(t, err)
+}

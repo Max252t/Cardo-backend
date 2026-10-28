@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,21 +38,20 @@ func scrapeHandler(t *testing.T, h http.Handler) string {
 
 func TestDisabledObservabilityProvidesNoRecordersAndNoHandler(t *testing.T) {
 	t.Parallel()
-	obs := newObservability(config.Config{MetricsEnabled: false})
+	obs := newObservability(config.Config{MetricsAddr: ""})
 
 	assert.Nil(t, obs.ops)
 	assert.Nil(t, obs.realtime)
 	assert.Nil(t, obs.http)
 	assert.Nil(t, obs.handler)
-	require.NotNil(t, obs.wrap)
 }
 
 func TestDisabledObservabilityLeavesThePublisherUntouched(t *testing.T) {
 	t.Parallel()
-	obs := newObservability(config.Config{MetricsEnabled: false})
+	obs := newObservability(config.Config{MetricsAddr: ""})
 	inner := &stubPublisher{err: errors.New("boom")}
 
-	wrapped := obs.wrap(inner)
+	wrapped := obs.instrument(inner)
 
 	assert.Same(t, inner, wrapped.(*stubPublisher))
 	require.Error(t, wrapped.Publish(context.Background(), nil))
@@ -60,24 +60,23 @@ func TestDisabledObservabilityLeavesThePublisherUntouched(t *testing.T) {
 
 func TestEnabledObservabilityProvidesEveryRecorderAndHandler(t *testing.T) {
 	t.Parallel()
-	obs := newObservability(config.Config{MetricsEnabled: true})
+	obs := newObservability(config.Config{MetricsAddr: ":9091"})
 
 	assert.NotNil(t, obs.ops)
 	assert.NotNil(t, obs.realtime)
 	assert.NotNil(t, obs.http)
 	assert.NotNil(t, obs.handler)
-	require.NotNil(t, obs.wrap)
 }
 
 func TestEnabledObservabilitySharesOneRegistryAcrossRecorders(t *testing.T) {
 	t.Parallel()
-	obs := newObservability(config.Config{MetricsEnabled: true})
+	obs := newObservability(config.Config{MetricsAddr: ":9091"})
 
 	obs.ops.ObserveOp("op.card.create", "applied", time.Millisecond)
 	obs.realtime.ConnectionOpened()
 	obs.realtime.Resync("delta")
 	obs.http.ObserveRequest(http.MethodGet, "/healthz", http.StatusOK, time.Millisecond)
-	failing := obs.wrap(&stubPublisher{err: errors.New("boom")})
+	failing := obs.instrument(&stubPublisher{err: errors.New("boom")})
 	require.Error(t, failing.Publish(context.Background(), nil))
 
 	body := scrapeHandler(t, obs.handler)
@@ -90,10 +89,10 @@ func TestEnabledObservabilitySharesOneRegistryAcrossRecorders(t *testing.T) {
 
 func TestEnabledObservabilityWrapsThePublisher(t *testing.T) {
 	t.Parallel()
-	obs := newObservability(config.Config{MetricsEnabled: true})
+	obs := newObservability(config.Config{MetricsAddr: ":9091"})
 	inner := &stubPublisher{}
 
-	wrapped := obs.wrap(inner)
+	wrapped := obs.instrument(inner)
 
 	_, same := wrapped.(*stubPublisher)
 	assert.False(t, same)
@@ -104,8 +103,8 @@ func TestEnabledObservabilityWrapsThePublisher(t *testing.T) {
 
 func TestEachObservabilityInstanceHasItsOwnRegistry(t *testing.T) {
 	t.Parallel()
-	a := newObservability(config.Config{MetricsEnabled: true})
-	b := newObservability(config.Config{MetricsEnabled: true})
+	a := newObservability(config.Config{MetricsAddr: ":9091"})
+	b := newObservability(config.Config{MetricsAddr: ":9091"})
 
 	a.realtime.ConnectionOpened()
 
@@ -124,35 +123,52 @@ type unusedBoards struct{ httpapi.BoardService }
 func routerFor(t *testing.T, obs observability) http.Handler {
 	t.Helper()
 	r, err := httpapi.NewRouter(httpapi.Deps{
-		Auth:           unusedAuth{},
-		Tokens:         unusedTokens{},
-		Users:          unusedUsers{},
-		Boards:         unusedBoards{},
-		Metrics:        obs.http,
-		MetricsHandler: obs.handler,
+		Auth:    unusedAuth{},
+		Tokens:  unusedTokens{},
+		Users:   unusedUsers{},
+		Boards:  unusedBoards{},
+		Metrics: obs.http,
 	})
 	require.NoError(t, err)
 	return r
 }
 
-func TestMetricsRouteFollowsTheMetricsEnabledFlag(t *testing.T) {
+func TestMainRouterNeverServesMetrics(t *testing.T) {
 	t.Parallel()
-	enabled := routerFor(t, newObservability(config.Config{MetricsEnabled: true}))
-	disabled := routerFor(t, newObservability(config.Config{MetricsEnabled: false}))
+	for _, addr := range []string{":9091", ""} {
+		router := routerFor(t, newObservability(config.Config{MetricsAddr: addr}))
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
+		assert.Equal(t, http.StatusNotFound, rec.Code, addr)
+	}
+}
+
+func TestMetricsServerIsBuiltOnlyWhenEnabledAndServesOnlyMetrics(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.DiscardHandler)
+	assert.Nil(t, newMetricsServer(config.Config{}, newObservability(config.Config{}), logger))
+
+	cfg := config.Config{MetricsAddr: ":9091"}
+	srv := newMetricsServer(cfg, newObservability(cfg), logger)
+	require.NotNil(t, srv)
+	assert.Equal(t, ":9091", srv.Addr)
 
 	rec := httptest.NewRecorder()
-	enabled.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
+	srv.Handler.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "go_goroutines")
 
 	rec = httptest.NewRecorder()
-	disabled.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
+	srv.Handler.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", nil))
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+	rec = httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/metrics", nil))
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 }
 
 func TestRouterRecordsRequestsIntoTheEnabledRegistry(t *testing.T) {
 	t.Parallel()
-	obs := newObservability(config.Config{MetricsEnabled: true})
+	obs := newObservability(config.Config{MetricsAddr: ":9091"})
 	router := routerFor(t, obs)
 
 	for _, path := range []string{"/healthz", "/nowhere/secret"} {
@@ -167,7 +183,7 @@ func TestRouterRecordsRequestsIntoTheEnabledRegistry(t *testing.T) {
 
 func TestDisabledRouterStillServesRequests(t *testing.T) {
 	t.Parallel()
-	router := routerFor(t, newObservability(config.Config{MetricsEnabled: false}))
+	router := routerFor(t, newObservability(config.Config{MetricsAddr: ""}))
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/healthz", nil))

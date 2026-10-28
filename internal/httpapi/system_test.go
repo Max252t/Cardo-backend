@@ -1,6 +1,7 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -322,23 +323,26 @@ func TestMetricsMiddlewareUsesRouteTemplates(t *testing.T) {
 	}, rec.seen)
 }
 
-func TestMetricsEndpointIsOptional(t *testing.T) {
+func TestHealthEndpointsLogAtDebugEvenWhenDraining(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("metrics-body"))
+	e.shuttingDown = func() bool { return true }
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	r, err := httpapi.NewRouter(httpapi.Deps{
+		Logger: logger, Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards,
+		ShuttingDown: e.shuttingDown,
 	})
-
-	with, err := httpapi.NewRouter(httpapi.Deps{Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards, MetricsHandler: handler})
 	require.NoError(t, err)
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, path, nil))
+	}
+
+	assert.Empty(t, buf.String())
+
 	rec := httptest.NewRecorder()
-	with.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "metrics-body", rec.Body.String())
-
-	without, err := httpapi.NewRouter(httpapi.Deps{Auth: e.auth, Tokens: e.tokens, Users: e.users, Boards: e.boards})
-	require.NoError(t, err)
-	rec = httptest.NewRecorder()
-	without.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
-	assert.Equal(t, http.StatusNotFound, rec.Code)
+	r.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/nowhere", nil))
+	assert.Contains(t, buf.String(), `"route":"unmatched"`)
 }
