@@ -50,7 +50,7 @@ func TestMigrateCreatesSchema(t *testing.T) {
 		tableNames(t, pool))
 
 	version, dirty, rows := migrationState(t, pool)
-	assert.Equal(t, int64(2), version)
+	assert.Equal(t, int64(3), version)
 	assert.False(t, dirty)
 	assert.Equal(t, 1, rows)
 
@@ -65,7 +65,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 		require.NoError(t, storage.Migrate(context.Background(), pool, discardLogger))
 	}
 	version, dirty, rows := migrationState(t, pool)
-	assert.Equal(t, int64(2), version)
+	assert.Equal(t, int64(3), version)
 	assert.False(t, dirty)
 	assert.Equal(t, 1, rows)
 }
@@ -104,7 +104,7 @@ func TestMigrateConcurrentCalls(t *testing.T) {
 	}
 
 	version, dirty, rows := migrationState(t, pools[0])
-	assert.Equal(t, int64(2), version)
+	assert.Equal(t, int64(3), version)
 	assert.False(t, dirty)
 	assert.Equal(t, 1, rows)
 	assert.Contains(t, tableNames(t, pools[0]), "users")
