@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/rank"
 )
@@ -99,40 +100,36 @@ func rankAt(current []domain.RankedItem, self uuid.UUID, after, before *uuid.UUI
 	return r, true
 }
 
-type rankProbe struct {
-	rankOf func(ctx context.Context, id uuid.UUID) (string, bool, error)
-	after  func(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error)
-	before func(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error)
-	last   func(ctx context.Context, exclude uuid.UUID) (string, bool, error)
+type rankProbe interface {
+	window(ctx context.Context, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) (anchorRank, neighbour string, found bool, err error)
+	last(ctx context.Context, exclude uuid.UUID) (string, bool, error)
 }
 
-func (p rankProbe) bounds(ctx context.Context, self uuid.UUID, after, before *uuid.UUID) (string, string, error) {
+func probeBounds(ctx context.Context, p rankProbe, self uuid.UUID, after, before *uuid.UUID) (string, string, error) {
 	if id := anchor(after); id != uuid.Nil {
-		anchorRank, ok, err := p.rankOf(ctx, id)
+		anchorRank, next, ok, err := p.window(ctx, id, boardtx.RankAfter, self)
 		if err != nil {
 			return "", "", err
 		}
 		if ok {
-			next, _, err := p.after(ctx, anchorRank, self)
-			return anchorRank, next, err
+			return anchorRank, next, nil
 		}
 	}
 	if id := anchor(before); id != uuid.Nil {
-		anchorRank, ok, err := p.rankOf(ctx, id)
+		anchorRank, prev, ok, err := p.window(ctx, id, boardtx.RankBefore, self)
 		if err != nil {
 			return "", "", err
 		}
 		if ok {
-			prev, _, err := p.before(ctx, anchorRank, self)
-			return prev, anchorRank, err
+			return prev, anchorRank, nil
 		}
 	}
 	tail, _, err := p.last(ctx, self)
 	return tail, "", err
 }
 
-func (p rankProbe) place(ctx context.Context, self uuid.UUID, after, before *uuid.UUID) (string, bool, error) {
-	lower, upper, err := p.bounds(ctx, self, after, before)
+func probePlace(ctx context.Context, p rankProbe, self uuid.UUID, after, before *uuid.UUID) (string, bool, error) {
+	lower, upper, err := probeBounds(ctx, p, self, after, before)
 	if err != nil {
 		return "", false, err
 	}
@@ -144,7 +141,7 @@ func (p rankProbe) place(ctx context.Context, self uuid.UUID, after, before *uui
 }
 
 type rankScope struct {
-	probe    *rankProbe
+	probe    rankProbe
 	load     func(context.Context) ([]domain.RankedItem, error)
 	rerank   func(context.Context, []domain.RankedItem) error
 	announce func(context.Context, placement) error
@@ -155,7 +152,7 @@ func placeIn(ctx context.Context, scope rankScope, self uuid.UUID, after, before
 		return placement{}, err
 	}
 	if scope.probe != nil {
-		r, ok, err := scope.probe.place(ctx, self, after, before)
+		r, ok, err := probePlace(ctx, scope.probe, self, after, before)
 		if err != nil {
 			return placement{}, err
 		}

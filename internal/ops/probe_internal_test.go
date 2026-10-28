@@ -12,47 +12,51 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/rank"
 )
 
-func memoryProbe(list []domain.RankedItem) rankProbe {
+type memoryRanks struct {
+	sorted []domain.RankedItem
+}
+
+func memoryProbe(list []domain.RankedItem) *memoryRanks {
 	sorted := slices.Clone(list)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Rank < sorted[j].Rank })
-	return rankProbe{
-		rankOf: func(_ context.Context, id uuid.UUID) (string, bool, error) {
-			for _, it := range sorted {
-				if it.ID == id {
-					return it.Rank, true, nil
+	return &memoryRanks{sorted: sorted}
+}
+
+func (m *memoryRanks) window(_ context.Context, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) (string, string, bool, error) {
+	for i, it := range m.sorted {
+		if it.ID != anchor {
+			continue
+		}
+		if dir == boardtx.RankAfter {
+			for _, n := range m.sorted[i+1:] {
+				if n.ID != exclude {
+					return it.Rank, n.Rank, true, nil
 				}
 			}
-			return "", false, nil
-		},
-		after: func(_ context.Context, r string, exclude uuid.UUID) (string, bool, error) {
-			for _, it := range sorted {
-				if it.Rank > r && it.ID != exclude {
-					return it.Rank, true, nil
+		} else {
+			for j := i - 1; j >= 0; j-- {
+				if m.sorted[j].ID != exclude {
+					return it.Rank, m.sorted[j].Rank, true, nil
 				}
 			}
-			return "", false, nil
-		},
-		before: func(_ context.Context, r string, exclude uuid.UUID) (string, bool, error) {
-			for i := len(sorted) - 1; i >= 0; i-- {
-				if sorted[i].Rank < r && sorted[i].ID != exclude {
-					return sorted[i].Rank, true, nil
-				}
-			}
-			return "", false, nil
-		},
-		last: func(_ context.Context, exclude uuid.UUID) (string, bool, error) {
-			for i := len(sorted) - 1; i >= 0; i-- {
-				if sorted[i].ID != exclude {
-					return sorted[i].Rank, true, nil
-				}
-			}
-			return "", false, nil
-		},
+		}
+		return it.Rank, "", true, nil
 	}
+	return "", "", false, nil
+}
+
+func (m *memoryRanks) last(_ context.Context, exclude uuid.UUID) (string, bool, error) {
+	for i := len(m.sorted) - 1; i >= 0; i-- {
+		if m.sorted[i].ID != exclude {
+			return m.sorted[i].Rank, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func spacedItems(t *testing.T, n int) []domain.RankedItem {
@@ -97,7 +101,7 @@ func TestProbePlacementMatchesFullListPlacement(t *testing.T) {
 
 		want, err := place(list, self, after, before)
 		require.NoError(t, err)
-		got, ok, err := memoryProbe(list).place(ctx, self, after, before)
+		got, ok, err := probePlace(ctx, memoryProbe(list), self, after, before)
 		require.NoError(t, err)
 		require.True(t, ok, "round %d", round)
 		assert.Equal(t, want.rank, got, "round %d", round)
@@ -105,9 +109,8 @@ func TestProbePlacementMatchesFullListPlacement(t *testing.T) {
 }
 
 func countingScope(list []domain.RankedItem, loads, reranks *int) rankScope {
-	p := memoryProbe(list)
 	return rankScope{
-		probe: &p,
+		probe: memoryProbe(list),
 		load: func(context.Context) ([]domain.RankedItem, error) {
 			*loads++
 			return list, nil
@@ -162,7 +165,7 @@ func TestPlaceInRejectsSelfAnchorsBeforeTouchingStorage(t *testing.T) {
 	t.Parallel()
 	self := uuid.New()
 	scope := rankScope{
-		probe: &rankProbe{},
+		probe: memoryProbe(nil),
 		load:  func(context.Context) ([]domain.RankedItem, error) { t.Fatal("must not load"); return nil, nil },
 	}
 	_, err := placeIn(context.Background(), scope, self, &self, nil)

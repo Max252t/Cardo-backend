@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,6 +27,25 @@ func (b *BoardTx) queryRank(ctx context.Context, sql string, args ...any) (strin
 		return "", false, err
 	}
 	return rank, true, nil
+}
+
+func windowSQL(tmpl string, dir boardtx.RankDirection) string {
+	if dir == boardtx.RankBefore {
+		return fmt.Sprintf(tmpl, "<", "DESC")
+	}
+	return fmt.Sprintf(tmpl, ">", "ASC")
+}
+
+func (b *BoardTx) queryWindow(ctx context.Context, sql string, args ...any) (string, string, bool, error) {
+	var anchor, neighbour string
+	err := b.tx.QueryRow(ctx, sql, args...).Scan(&anchor, &neighbour)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return anchor, neighbour, true, nil
 }
 
 func splitRanked(items []domain.RankedItem) ([]uuid.UUID, []string) {

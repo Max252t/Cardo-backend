@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Max252t/Cardo-backend/internal/boardcontent"
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
@@ -178,20 +179,7 @@ func (a *applier) cardArchive(ctx context.Context, p *boardcontent.CardArchive) 
 
 func (a *applier) cardRanks(columnID uuid.UUID) rankScope {
 	return rankScope{
-		probe: &rankProbe{
-			rankOf: func(ctx context.Context, id uuid.UUID) (string, bool, error) {
-				return a.btx.CardRankOf(ctx, columnID, id)
-			},
-			after: func(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error) {
-				return a.btx.CardRankAfter(ctx, columnID, rank, exclude)
-			},
-			before: func(ctx context.Context, rank string, exclude uuid.UUID) (string, bool, error) {
-				return a.btx.CardRankBefore(ctx, columnID, rank, exclude)
-			},
-			last: func(ctx context.Context, exclude uuid.UUID) (string, bool, error) {
-				return a.btx.CardLastRank(ctx, columnID, exclude)
-			},
-		},
+		probe: cardProbe{btx: a.btx, columnID: columnID},
 		load: func(ctx context.Context) ([]domain.RankedItem, error) {
 			return a.btx.CardRanks(ctx, columnID)
 		},
@@ -217,4 +205,17 @@ func (a *applier) emitCardRebalance(ctx context.Context, columnID uuid.UUID, pl 
 		Cards:    cards,
 		ActorID:  a.actor,
 	})
+}
+
+type cardProbe struct {
+	btx      boardtx.Tx
+	columnID uuid.UUID
+}
+
+func (p cardProbe) window(ctx context.Context, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) (string, string, bool, error) {
+	return p.btx.CardRankWindow(ctx, p.columnID, anchor, dir, exclude)
+}
+
+func (p cardProbe) last(ctx context.Context, exclude uuid.UUID) (string, bool, error) {
+	return p.btx.CardLastRank(ctx, p.columnID, exclude)
 }

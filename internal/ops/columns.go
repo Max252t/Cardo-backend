@@ -6,7 +6,9 @@ import (
 	"fmt"
 
 	"github.com/Max252t/Cardo-backend/internal/boardcontent"
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
+	"github.com/google/uuid"
 )
 
 func (a *applier) columnCreate(ctx context.Context, p *boardcontent.ColumnCreate) error {
@@ -102,12 +104,7 @@ func (a *applier) columnArchive(ctx context.Context, p *boardcontent.ColumnArchi
 
 func (a *applier) columnRanks() rankScope {
 	return rankScope{
-		probe: &rankProbe{
-			rankOf: a.btx.ColumnRankOf,
-			after:  a.btx.ColumnRankAfter,
-			before: a.btx.ColumnRankBefore,
-			last:   a.btx.ColumnLastRank,
-		},
+		probe:    columnProbe{btx: a.btx},
 		load:     a.btx.ColumnRanks,
 		rerank:   a.btx.RerankColumns,
 		announce: a.emitColumnRebalance,
@@ -126,4 +123,16 @@ func (a *applier) emitColumnRebalance(ctx context.Context, pl placement) error {
 		Columns: cols,
 		ActorID: a.actor,
 	})
+}
+
+type columnProbe struct {
+	btx boardtx.Tx
+}
+
+func (p columnProbe) window(ctx context.Context, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) (string, string, bool, error) {
+	return p.btx.ColumnRankWindow(ctx, anchor, dir, exclude)
+}
+
+func (p columnProbe) last(ctx context.Context, exclude uuid.UUID) (string, bool, error) {
+	return p.btx.ColumnLastRank(ctx, exclude)
 }

@@ -67,120 +67,112 @@ func (w *rankWorld) inLock(t *testing.T, fn func(ctx context.Context, btx boardt
 	}))
 }
 
-func rankOK(t *testing.T) func(string, bool, error) (string, bool) {
-	return func(rank string, ok bool, err error) (string, bool) {
+type window struct {
+	anchor, neighbour string
+	found             bool
+}
+
+func cardWindow(t *testing.T, btx boardtx.Tx, col, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) window {
+	t.Helper()
+	a, n, ok, err := btx.CardRankWindow(context.Background(), col, anchor, dir, exclude)
+	require.NoError(t, err)
+	return window{a, n, ok}
+}
+
+func columnWindow(t *testing.T, btx boardtx.Tx, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) window {
+	t.Helper()
+	a, n, ok, err := btx.ColumnRankWindow(context.Background(), anchor, dir, exclude)
+	require.NoError(t, err)
+	return window{a, n, ok}
+}
+
+func lastRank(t *testing.T) func(string, bool, error) (string, bool) {
+	return func(r string, ok bool, err error) (string, bool) {
 		t.Helper()
 		require.NoError(t, err)
-		return rank, ok
+		return r, ok
 	}
 }
 
-func TestCardRankNeighboursUseBytewiseOrder(t *testing.T) {
+func TestCardRankWindowUsesBytewiseOrder(t *testing.T) {
 	w := newRankWorld(t)
 	w.inLock(t, func(ctx context.Context, btx boardtx.Tx) {
-		r, ok := rankOK(t)(btx.CardRankOf(ctx, w.column, w.cards["a3"]))
-		assert.True(t, ok)
-		assert.Equal(t, "a3", r)
+		assert.Equal(t, window{"Zy", "a0", true}, cardWindow(t, btx, w.column, w.cards["Zy"], boardtx.RankAfter, uuid.Nil), "uppercase sorts before lowercase")
+		assert.Equal(t, window{"a1", "a3", true}, cardWindow(t, btx, w.column, w.cards["a1"], boardtx.RankAfter, uuid.Nil))
+		assert.Equal(t, window{"a0", "Zy", true}, cardWindow(t, btx, w.column, w.cards["a0"], boardtx.RankBefore, uuid.Nil))
+		assert.Equal(t, window{"a5", "", true}, cardWindow(t, btx, w.column, w.cards["a5"], boardtx.RankAfter, uuid.Nil))
+		assert.Equal(t, window{"Zy", "", true}, cardWindow(t, btx, w.column, w.cards["Zy"], boardtx.RankBefore, uuid.Nil))
 
-		r, ok = rankOK(t)(btx.CardRankAfter(ctx, w.column, "Zy", uuid.Nil))
-		assert.True(t, ok)
-		assert.Equal(t, "a0", r, "uppercase sorts before lowercase")
-
-		r, ok = rankOK(t)(btx.CardRankAfter(ctx, w.column, "a1", uuid.Nil))
-		assert.True(t, ok)
-		assert.Equal(t, "a3", r)
-
-		r, ok = rankOK(t)(btx.CardRankBefore(ctx, w.column, "a0", uuid.Nil))
-		assert.True(t, ok)
-		assert.Equal(t, "Zy", r)
-
-		r, ok = rankOK(t)(btx.CardLastRank(ctx, w.column, uuid.Nil))
+		r, ok := lastRank(t)(btx.CardLastRank(ctx, w.column, uuid.Nil))
 		assert.True(t, ok)
 		assert.Equal(t, "a5", r)
-
-		_, ok = rankOK(t)(btx.CardRankAfter(ctx, w.column, "a5", uuid.Nil))
-		assert.False(t, ok)
-		_, ok = rankOK(t)(btx.CardRankBefore(ctx, w.column, "Zy", uuid.Nil))
-		assert.False(t, ok)
 	})
 }
 
-func TestCardRankNeighboursExcludeSelfAndScopeToColumn(t *testing.T) {
+func TestCardRankWindowExcludesSelfAndScopesToColumn(t *testing.T) {
 	w := newRankWorld(t)
 	w.inLock(t, func(ctx context.Context, btx boardtx.Tx) {
-		r, _ := rankOK(t)(btx.CardRankAfter(ctx, w.column, "a1", w.cards["a3"]))
-		assert.Equal(t, "a5", r, "the excluded card is skipped")
+		assert.Equal(t, window{"a1", "a5", true}, cardWindow(t, btx, w.column, w.cards["a1"], boardtx.RankAfter, w.cards["a3"]), "the excluded card is skipped")
+		assert.Equal(t, window{"a5", "a1", true}, cardWindow(t, btx, w.column, w.cards["a5"], boardtx.RankBefore, w.cards["a3"]))
 
-		r, _ = rankOK(t)(btx.CardRankBefore(ctx, w.column, "a5", w.cards["a3"]))
-		assert.Equal(t, "a1", r)
-
-		r, _ = rankOK(t)(btx.CardLastRank(ctx, w.column, w.cards["a5"]))
+		r, _ := lastRank(t)(btx.CardLastRank(ctx, w.column, w.cards["a5"]))
 		assert.Equal(t, "a3", r)
 
-		_, ok := rankOK(t)(btx.CardRankOf(ctx, w.other, w.cards["a3"]))
-		assert.False(t, ok, "a card of another column is not an anchor")
+		assert.False(t, cardWindow(t, btx, w.other, w.cards["a3"], boardtx.RankAfter, uuid.Nil).found, "a card of another column is not an anchor")
+		assert.False(t, cardWindow(t, btx, w.column, uuid.New(), boardtx.RankAfter, uuid.Nil).found)
 
-		r, ok = rankOK(t)(btx.CardLastRank(ctx, w.other, uuid.Nil))
+		r, ok := lastRank(t)(btx.CardLastRank(ctx, w.other, uuid.Nil))
 		assert.True(t, ok)
 		assert.Equal(t, "zz", r)
-
-		_, ok = rankOK(t)(btx.CardLastRank(ctx, uuid.New(), uuid.Nil))
+		_, ok = lastRank(t)(btx.CardLastRank(ctx, uuid.New(), uuid.Nil))
 		assert.False(t, ok)
 	})
 }
 
-func TestCardRankNeighboursIgnoreArchivedCards(t *testing.T) {
+func TestCardRankWindowIgnoresArchivedCards(t *testing.T) {
 	w := newRankWorld(t)
 	w.inLock(t, func(ctx context.Context, btx boardtx.Tx) {
 		_, err := btx.ArchiveCard(ctx, w.cards["a5"], w.owner.ID)
 		require.NoError(t, err)
 
-		r, _ := rankOK(t)(btx.CardLastRank(ctx, w.column, uuid.Nil))
+		r, _ := lastRank(t)(btx.CardLastRank(ctx, w.column, uuid.Nil))
 		assert.Equal(t, "a3", r)
-		_, ok := rankOK(t)(btx.CardRankOf(ctx, w.column, w.cards["a5"]))
-		assert.False(t, ok)
-		_, ok = rankOK(t)(btx.CardRankAfter(ctx, w.column, "a3", uuid.Nil))
-		assert.False(t, ok)
+		assert.False(t, cardWindow(t, btx, w.column, w.cards["a5"], boardtx.RankAfter, uuid.Nil).found)
+		assert.Equal(t, window{"a3", "", true}, cardWindow(t, btx, w.column, w.cards["a3"], boardtx.RankAfter, uuid.Nil))
 	})
 }
 
-func TestColumnRankNeighboursUseBytewiseOrder(t *testing.T) {
+func TestColumnRankWindowUsesBytewiseOrder(t *testing.T) {
 	w := newRankWorld(t)
 	w.inLock(t, func(ctx context.Context, btx boardtx.Tx) {
-		r, ok := rankOK(t)(btx.ColumnRankOf(ctx, w.cols["a2"]))
-		assert.True(t, ok)
-		assert.Equal(t, "a2", r)
+		assert.Equal(t, window{"Zz", "a0", true}, columnWindow(t, btx, w.cols["Zz"], boardtx.RankAfter, uuid.Nil))
+		assert.Equal(t, window{"a0", "a4", true}, columnWindow(t, btx, w.cols["a0"], boardtx.RankAfter, w.cols["a2"]))
+		assert.Equal(t, window{"a0", "Zz", true}, columnWindow(t, btx, w.cols["a0"], boardtx.RankBefore, uuid.Nil))
+		assert.Equal(t, window{"a4", "a0", true}, columnWindow(t, btx, w.cols["a4"], boardtx.RankBefore, w.cols["a2"]))
+		assert.Equal(t, window{"a4", "", true}, columnWindow(t, btx, w.cols["a4"], boardtx.RankAfter, uuid.Nil))
+		assert.False(t, columnWindow(t, btx, uuid.New(), boardtx.RankAfter, uuid.Nil).found)
 
-		r, _ = rankOK(t)(btx.ColumnRankAfter(ctx, "Zz", uuid.Nil))
-		assert.Equal(t, "a0", r)
-		r, _ = rankOK(t)(btx.ColumnRankAfter(ctx, "a0", w.cols["a2"]))
+		r, _ := lastRank(t)(btx.ColumnLastRank(ctx, uuid.Nil))
 		assert.Equal(t, "a4", r)
-		r, _ = rankOK(t)(btx.ColumnRankBefore(ctx, "a0", uuid.Nil))
-		assert.Equal(t, "Zz", r)
-		r, _ = rankOK(t)(btx.ColumnRankBefore(ctx, "a4", w.cols["a2"]))
-		assert.Equal(t, "a0", r)
-		r, _ = rankOK(t)(btx.ColumnLastRank(ctx, uuid.Nil))
-		assert.Equal(t, "a4", r)
-		r, _ = rankOK(t)(btx.ColumnLastRank(ctx, w.cols["a4"]))
+		r, _ = lastRank(t)(btx.ColumnLastRank(ctx, w.cols["a4"]))
 		assert.Equal(t, "a2", r)
-
-		_, ok = rankOK(t)(btx.ColumnRankAfter(ctx, "a4", uuid.Nil))
-		assert.False(t, ok)
 	})
 }
 
-func TestColumnRankNeighboursAreScopedToTheBoard(t *testing.T) {
+func TestColumnRankWindowIsScopedToTheBoard(t *testing.T) {
 	w := newRankWorld(t)
 	foreign := createBoard(t, w.store, w.owner.ID, "foreign")
+	var foreignCol uuid.UUID
 	require.NoError(t, w.store.WithBoardLock(context.Background(), foreign.ID, func(ctx context.Context, btx boardtx.Tx) error {
-		_, err := btx.InsertColumn(ctx, domain.Column{ID: uuid.New(), Title: "z", Rank: "z9"})
+		foreignCol = uuid.New()
+		_, err := btx.InsertColumn(ctx, domain.Column{ID: foreignCol, Title: "z", Rank: "z9"})
 		return err
 	}))
 
 	w.inLock(t, func(ctx context.Context, btx boardtx.Tx) {
-		r, _ := rankOK(t)(btx.ColumnLastRank(ctx, uuid.Nil))
+		r, _ := lastRank(t)(btx.ColumnLastRank(ctx, uuid.Nil))
 		assert.Equal(t, "a4", r)
-		_, ok := rankOK(t)(btx.ColumnRankAfter(ctx, "a4", uuid.Nil))
-		assert.False(t, ok)
+		assert.Equal(t, window{"a4", "", true}, columnWindow(t, btx, w.cols["a4"], boardtx.RankAfter, uuid.Nil))
+		assert.False(t, columnWindow(t, btx, foreignCol, boardtx.RankAfter, uuid.Nil).found)
 	})
 }
