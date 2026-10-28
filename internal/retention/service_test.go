@@ -315,7 +315,7 @@ func TestConfigValidationBoundaries(t *testing.T) {
 func TestConfigValidationReportsEveryProblem(t *testing.T) {
 	err := retention.Config{}.Validate()
 	require.Error(t, err)
-	for _, part := range []string{"interval", "events retention", "processed ops retention", "batch size"} {
+	for _, part := range []string{retention.FieldInterval, retention.FieldEventsRetention, retention.FieldProcessedOpsRetention, retention.FieldBatchSize} {
 		assert.ErrorContains(t, err, part)
 	}
 }
