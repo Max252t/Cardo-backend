@@ -87,3 +87,5 @@ func positiveDuration(v, def time.Duration) time.Duration {
 	}
 	return v
 }
+
+const roleRecheckInterval = time.Second

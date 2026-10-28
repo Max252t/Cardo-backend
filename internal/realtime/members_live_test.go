@@ -68,6 +68,7 @@ func TestMemberRoleChangeUpdatesTheCachedRoleOfLiveConnections(t *testing.T) {
 	sendOp(bobConn, boardcontent.OpCardCreate)
 	bobConn.Expect("card.create")
 
+	env.Board.SetRole(bob, domain.RoleViewer)
 	appendMemberEvent(t, env, owner, boardcontent.EventMemberRoleChanged, boardcontent.MemberRoleChanged{UserID: bob, Role: domain.RoleViewer, ActorID: owner})
 	drainUntil(bobConn, boardcontent.EventMemberRoleChanged)
 	require.Eventually(t, func() bool {
@@ -85,6 +86,7 @@ func TestMemberRoleChangeUpdatesTheCachedRoleOfLiveConnections(t *testing.T) {
 		}
 	}, eventually, 20*time.Millisecond)
 
+	env.Board.SetRole(bob, domain.RoleEditor)
 	appendMemberEvent(t, env, owner, boardcontent.EventMemberRoleChanged, boardcontent.MemberRoleChanged{UserID: bob, Role: domain.RoleEditor, ActorID: owner})
 	drainUntil(bobConn, boardcontent.EventMemberRoleChanged)
 	require.Eventually(t, func() bool {

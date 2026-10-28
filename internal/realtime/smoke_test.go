@@ -398,7 +398,8 @@ func TestHubCloseUserAndRoleUpdate(t *testing.T) {
 	bobConn := inst.Dial(t, bob)
 	bobConn.HandshakeSnapshot()
 	annConn.Expect(protocol.TypePresenceJoin)
-
+	env.Board.SetRole(ann, domain.RoleViewer)
+	inst.Hub.SetRole(env.Board.ID, ann, domain.RoleViewer)
 	inst.Hub.SetRole(env.Board.ID, ann, domain.RoleViewer)
 	sendOp(annConn, boardcontent.OpCardCreate)
 	var body boardcontent.Nack

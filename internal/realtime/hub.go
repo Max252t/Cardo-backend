@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Max252t/Cardo-backend/internal/boardcontent"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
@@ -90,22 +89,15 @@ func NewHub(deps Deps, cfg Config, opts ...HubOption) (*Hub, error) {
 		clock:      deps.Clock,
 		logger:     deps.Logger,
 		cfg:        cfg.withDefaults(),
-		hooks:      make(map[string][]EventHook),
+		hooks:      defaultHooks(),
 		baseCtx:    ctx,
 		cancelBase: cancel,
 		rooms:      make(map[uuid.UUID]*room),
 	}
-	h.hooks[boardcontent.EventBoardDeleted] = []EventHook{closeBoardOnDelete}
-	h.hooks[boardcontent.EventMemberRemoved] = []EventHook{closeRemovedMember}
-	h.hooks[boardcontent.EventMemberRoleChanged] = []EventHook{applyRoleChange}
 	for _, opt := range opts {
 		opt(h)
 	}
 	return h, nil
-}
-
-func closeBoardOnDelete(h *Hub, boardID uuid.UUID, _ protocol.Envelope) {
-	h.CloseBoard(boardID, protocol.CloseBoardDeleted, "board deleted")
 }
 
 func (h *Hub) Dispatch(channel string, payload []byte) {
@@ -298,20 +290,9 @@ func presenceSubject(env protocol.Envelope) uuid.UUID {
 	return uuid.Nil
 }
 
-func closeRemovedMember(h *Hub, boardID uuid.UUID, ev protocol.Envelope) {
-	var removed boardcontent.MemberRemoved
-	if err := json.Unmarshal(ev.Payload, &removed); err != nil {
-		h.logger.Warn("dropping malformed member.removed event", slog.String("board_id", boardID.String()), slog.Any("error", err))
-		return
+func (h *Hub) Role(boardID, userID uuid.UUID) domain.Role {
+	for _, c := range h.clientsWhere(boardID, ofUser(userID)) {
+		return c.Role()
 	}
-	h.CloseUser(boardID, removed.UserID, protocol.CloseAccessRevoked, "access revoked")
-}
-
-func applyRoleChange(h *Hub, boardID uuid.UUID, ev protocol.Envelope) {
-	var changed boardcontent.MemberRoleChanged
-	if err := json.Unmarshal(ev.Payload, &changed); err != nil || !changed.Role.Valid() {
-		h.logger.Warn("dropping malformed member.role_changed event", slog.String("board_id", boardID.String()))
-		return
-	}
-	h.SetRole(boardID, changed.UserID, changed.Role)
+	return ""
 }
