@@ -13,6 +13,7 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/boardevents"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 	"github.com/Max252t/Cardo-backend/internal/protocol"
+	"github.com/Max252t/Cardo-backend/internal/retention"
 )
 
 const otherLabel = "other"
@@ -53,6 +54,11 @@ type Collector struct {
 	opDuration    *prometheus.HistogramVec
 	publishErrors prometheus.Counter
 	httpDuration  *prometheus.HistogramVec
+	retained      *prometheus.CounterVec
+	retentionRuns *prometheus.CounterVec
+	retentionLast *prometheus.GaugeVec
+	restLimited   prometheus.Counter
+	restLimitErrs prometheus.Counter
 }
 
 func New() *Collector {
@@ -89,11 +95,31 @@ func New() *Collector {
 			Help:    "HTTP request duration by method, route template and status.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"method", "route", "status"}),
+		retained: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "retention_deleted_total",
+			Help: "Rows removed by the retention jobs by table.",
+		}, []string{"table"}),
+		retentionRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "retention_runs_total",
+			Help: "Retention job runs by table and result.",
+		}, []string{"table", "result"}),
+		retentionLast: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "retention_last_success_timestamp_seconds",
+			Help: "Unix time of the last successful retention run by table.",
+		}, []string{"table"}),
+		restLimited: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "rest_rate_limited_total",
+			Help: "REST requests rejected by the per-user rate limit.",
+		}),
+		restLimitErrs: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "rest_rate_limiter_errors_total",
+			Help: "REST rate limiter backend failures, requests are allowed through.",
+		}),
 	}
 	reg.MustRegister(
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		c.wsConnections, c.wsClosed, c.resyncs, c.ops, c.opDuration, c.publishErrors, c.httpDuration,
+		c.wsConnections, c.wsClosed, c.resyncs, c.ops, c.opDuration, c.publishErrors, c.httpDuration, c.retained, c.retentionRuns, c.retentionLast, c.restLimited, c.restLimitErrs,
 	)
 	return c
 }
@@ -133,6 +159,25 @@ func (c *Collector) ObserveRequest(method, route string, status int, d time.Dura
 		method = otherLabel
 	}
 	c.httpDuration.WithLabelValues(method, route, strconv.Itoa(status)).Observe(d.Seconds())
+}
+
+func (c *Collector) Deleted(table string, n int64) {
+	c.retained.WithLabelValues(table).Add(float64(n))
+}
+
+func (c *Collector) Ran(table, result string) {
+	c.retentionRuns.WithLabelValues(table, result).Inc()
+	if result == retention.ResultOK {
+		c.retentionLast.WithLabelValues(table).SetToCurrentTime()
+	}
+}
+
+func (c *Collector) RateLimited() {
+	c.restLimited.Inc()
+}
+
+func (c *Collector) RateLimiterError() {
+	c.restLimitErrs.Inc()
 }
 
 func (c *Collector) InstrumentPublisher(p boardevents.Publisher) boardevents.Publisher {

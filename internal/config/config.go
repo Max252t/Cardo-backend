@@ -10,11 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Max252t/Cardo-backend/internal/retention"
 )
 
 const (
-	minJWTSecretLength = 32
-	minDBConns         = 2
+	minJWTSecretLength  = 32
+	minDBConns          = 2
+	minRetentionDBConns = 3
 )
 
 type Config struct {
@@ -53,6 +56,16 @@ type Config struct {
 
 	MetricsAddr string
 
+	RetentionEnabled      bool
+	RetentionInterval     time.Duration
+	EventsRetention       time.Duration
+	EventsKeepMin         int
+	ProcessedOpsRetention time.Duration
+	RetentionBatchSize    int
+
+	RESTRateLimit float64
+	RESTRateBurst int
+
 	LogLevel slog.Level
 }
 
@@ -90,7 +103,18 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		HashAcquireTimeout: p.duration("ARGON2_ACQUIRE_TIMEOUT", 2*time.Second),
 		WSAllowedOrigins:   p.list("WS_ALLOWED_ORIGINS"),
 		MetricsAddr:        p.str("METRICS_ADDR", ""),
-		LogLevel:           p.level("LOG_LEVEL", slog.LevelInfo),
+
+		RetentionEnabled:      p.boolean("RETENTION_ENABLED", true),
+		RetentionInterval:     p.duration("RETENTION_INTERVAL", time.Hour),
+		EventsRetention:       p.duration("EVENTS_RETENTION", 7*24*time.Hour),
+		EventsKeepMin:         p.integer("EVENTS_KEEP_MIN", 1000),
+		ProcessedOpsRetention: p.duration("PROCESSED_OPS_RETENTION", 24*time.Hour),
+		RetentionBatchSize:    p.integer("RETENTION_BATCH_SIZE", 1000),
+
+		RESTRateLimit: p.float("REST_RATE_LIMIT", 20),
+		RESTRateBurst: p.integer("REST_RATE_BURST", 40),
+
+		LogLevel: p.level("LOG_LEVEL", slog.LevelInfo),
 	}
 	if len(p.errs) > 0 {
 		return Config{}, errors.Join(p.errs...)
@@ -147,6 +171,8 @@ func (c Config) validate() error {
 	}
 	errs = append(errs, c.validateRedis()...)
 	errs = append(errs, c.validateMetricsAddr()...)
+	errs = append(errs, c.validateRetention()...)
+	errs = append(errs, c.validateRESTRateLimit()...)
 	if c.MaxBodyBytes <= 0 {
 		errs = append(errs, errors.New("HTTP_MAX_BODY_BYTES must be positive"))
 	}
@@ -212,6 +238,19 @@ func (p *parser) int32(key string, def int32) int32 {
 	return int32(n)
 }
 
+func (p *parser) float(key string, def float64) float64 {
+	v, ok := p.raw(key)
+	if !ok {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		p.errs = append(p.errs, fmt.Errorf("%s: invalid number %q", key, v))
+		return def
+	}
+	return f
+}
+
 func (p *parser) boolean(key string, def bool) bool {
 	v, ok := p.raw(key)
 	if !ok {
@@ -274,4 +313,55 @@ func (c Config) validateMetricsAddr() []error {
 		return []error{errors.New("METRICS_ADDR must differ from HTTP_ADDR")}
 	}
 	return nil
+}
+
+var retentionEnvNames = map[string]string{
+	retention.FieldInterval:              "RETENTION_INTERVAL",
+	retention.FieldEventsRetention:       "EVENTS_RETENTION",
+	retention.FieldProcessedOpsRetention: "PROCESSED_OPS_RETENTION",
+	retention.FieldEventsKeepMin:         "EVENTS_KEEP_MIN",
+	retention.FieldBatchSize:             "RETENTION_BATCH_SIZE",
+}
+
+func (c Config) RetentionConfig() retention.Config {
+	return retention.Config{
+		Interval:              c.RetentionInterval,
+		EventsRetention:       c.EventsRetention,
+		EventsKeepMin:         c.EventsKeepMin,
+		ProcessedOpsRetention: c.ProcessedOpsRetention,
+		BatchSize:             c.RetentionBatchSize,
+	}
+}
+
+func (c Config) validateRetention() []error {
+	rc := c.RetentionConfig()
+	problems := rc.WindowProblems()
+	if c.RetentionEnabled {
+		problems = rc.Problems()
+	}
+	var errs []error
+	for _, p := range problems {
+		errs = append(errs, fmt.Errorf("%s %s", retentionEnvNames[p.Field], p.Message))
+	}
+	if c.RetentionEnabled && c.DBMaxConns < minRetentionDBConns {
+		errs = append(errs, fmt.Errorf("DB_MAX_CONNS must be at least %d when RETENTION_ENABLED=true", minRetentionDBConns))
+	}
+	return errs
+}
+
+const (
+	minRESTRateLimit = 0.001
+	maxRESTRateLimit = 1_000_000
+	maxRESTRateBurst = 1_000_000
+)
+
+func (c Config) validateRESTRateLimit() []error {
+	var errs []error
+	if c.RESTRateLimit != 0 && (c.RESTRateLimit < minRESTRateLimit || c.RESTRateLimit > maxRESTRateLimit) {
+		errs = append(errs, fmt.Errorf("REST_RATE_LIMIT must be 0 (disabled) or between %g and %d", minRESTRateLimit, maxRESTRateLimit))
+	}
+	if c.RESTRateLimit > 0 && (c.RESTRateBurst < 1 || c.RESTRateBurst > maxRESTRateBurst) {
+		errs = append(errs, fmt.Errorf("REST_RATE_BURST must be between 1 and %d when REST_RATE_LIMIT is enabled", maxRESTRateBurst))
+	}
+	return errs
 }

@@ -20,6 +20,7 @@ var (
 	ErrOverloaded        = errors.New("server overloaded")
 	ErrBusy              = errors.New("resource busy")
 	ErrGone              = errors.New("gone")
+	ErrEventPruned       = errors.New("event is no longer retained")
 	ErrAlreadyMember     = errors.New("already a member")
 	ErrInviteUnavailable = errors.New("invite is revoked, expired or exhausted")
 )

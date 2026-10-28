@@ -20,12 +20,18 @@ import (
 
 	"github.com/Max252t/Cardo-backend/internal/argon2id"
 	"github.com/Max252t/Cardo-backend/internal/auth"
+	"github.com/Max252t/Cardo-backend/internal/clock"
 	"github.com/Max252t/Cardo-backend/internal/config"
 	"github.com/Max252t/Cardo-backend/internal/httpapi"
 	"github.com/Max252t/Cardo-backend/internal/jwtauth"
 	"github.com/Max252t/Cardo-backend/internal/ratelimit"
 	"github.com/Max252t/Cardo-backend/internal/storage"
 	"github.com/Max252t/Cardo-backend/internal/users"
+)
+
+const (
+	restBreakerThreshold = 5
+	restBreakerCooldown  = 5 * time.Second
 )
 
 func main() {
@@ -93,9 +99,20 @@ func run(cfg config.Config, logger *slog.Logger) error {
 	}
 	defer rt.stop()
 
+	stopRetention, err := startRetention(ctx, cfg, store, obs, logger)
+	if err != nil {
+		return err
+	}
+	defer stopRetention()
+
 	lc := newLifecycle()
 	lc.closeSockets = rt.hub.Shutdown
 	defer lc.cancelBase()
+
+	restLimiter, err := newRESTLimiter(cfg, rdb, logger)
+	if err != nil {
+		return err
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	router, err := httpapi.NewRouter(httpapi.Deps{
@@ -112,6 +129,8 @@ func run(cfg config.Config, logger *slog.Logger) error {
 		TrustedProxies: cfg.TrustedProxies,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
 		Metrics:        obs.http,
+		RateLimiter:    restLimiter,
+		RateMetrics:    obs.rest,
 	})
 	if err != nil {
 		return err
@@ -163,6 +182,26 @@ func newLoginLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) 
 		return ratelimit.NewMemoryLimiter(cfg.LoginMaxFailures, cfg.LoginFailureWindow, nil)
 	}
 	return ratelimit.NewRedisLimiter(rdb, cfg.LoginMaxFailures, cfg.LoginFailureWindow)
+}
+
+func newRESTLimiter(cfg config.Config, rdb *redis.Client, logger *slog.Logger) (httpapi.RateLimiter, error) {
+	if cfg.RESTRateLimit == 0 {
+		logger.Warn("REST_RATE_LIMIT is 0: the per-user REST rate limit is disabled")
+		return nil, nil
+	}
+	if rdb == nil {
+		logger.Warn("SINGLE_INSTANCE is enabled: using the in-memory REST rate limiter")
+		l, err := ratelimit.NewMemoryRESTLimiter(cfg.RESTRateLimit, cfg.RESTRateBurst, clock.System{})
+		if err != nil {
+			return nil, fmt.Errorf("build rest limiter: %w", err)
+		}
+		return l, nil
+	}
+	l, err := ratelimit.NewRedisRESTLimiter(rdb, cfg.RESTRateLimit, cfg.RESTRateBurst)
+	if err != nil {
+		return nil, fmt.Errorf("build rest limiter: %w", err)
+	}
+	return ratelimit.NewBreaker(l, restBreakerThreshold, restBreakerCooldown, clock.System{}), nil
 }
 
 type lifecycle struct {

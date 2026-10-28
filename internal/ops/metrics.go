@@ -48,6 +48,8 @@ func metricResult(out boardcontent.OpOutcome, err error) string {
 		return ResultCanceled
 	case errors.Is(err, domain.ErrNotFound):
 		return boardcontent.ReasonNotFound
+	case errors.Is(err, domain.ErrEventPruned):
+		return boardcontent.ReasonResyncRequired
 	case errors.Is(err, domain.ErrForbidden):
 		return boardcontent.ReasonForbidden
 	case errors.As(err, &vErr):

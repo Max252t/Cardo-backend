@@ -13,7 +13,10 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/protocol"
 )
 
-const msgRoleForbidsChanges = "your role does not allow changing this board"
+const (
+	msgRoleForbidsChanges = "your role does not allow changing this board"
+	msgResyncRequired     = "the stored result of this operation is no longer retained, reload the board"
+)
 
 func (c *Client) handle(data []byte) {
 	env, err := protocol.ParseEnvelope(data)
@@ -183,6 +186,8 @@ func (c *Client) finishOp(op boardcontent.Op, out boardcontent.OpOutcome, err er
 	case err == nil:
 		c.deliverOutcome(op, out)
 	case c.ctx.Err() != nil:
+	case errors.Is(err, domain.ErrEventPruned):
+		c.localNack(op.OpID, boardcontent.ReasonResyncRequired, msgResyncRequired)
 	case errors.Is(err, domain.ErrNotFound):
 		c.closeWith(protocol.CloseBoardDeleted, "board not found")
 	case errors.Is(err, domain.ErrForbidden):

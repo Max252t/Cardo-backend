@@ -92,7 +92,7 @@ func probeDocker() (err error) {
 	return provider.Health(context.Background())
 }
 
-func requireDocker(t *testing.T) {
+func requireDocker(t testing.TB) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test skipped in short mode")
@@ -107,7 +107,7 @@ func requireDocker(t *testing.T) {
 	t.Skipf("docker is not available, skipping integration test: %v", err)
 }
 
-func RequireDocker(t *testing.T) {
+func RequireDocker(t testing.TB) {
 	t.Helper()
 	requireDocker(t)
 }
@@ -144,7 +144,7 @@ func (s *shared) start(fn func(context.Context) (testcontainers.Container, strin
 	})
 }
 
-func postgresAdminDSN(t *testing.T) string {
+func postgresAdminDSN(t testing.TB) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test skipped in short mode")
@@ -160,7 +160,7 @@ func postgresAdminDSN(t *testing.T) string {
 	return pgContainer.dsn
 }
 
-func NewDatabase(t *testing.T) string {
+func NewDatabase(t testing.TB) string {
 	t.Helper()
 	adminDSN := postgresAdminDSN(t)
 
@@ -192,7 +192,7 @@ func NewDatabase(t *testing.T) string {
 	return u.String()
 }
 
-func NewPool(t *testing.T) *pgxpool.Pool {
+func NewPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	dsn := NewDatabase(t)
 	pool, err := storage.NewPool(context.Background(), dsn, 20)
@@ -203,7 +203,7 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func NewMigratedPool(t *testing.T) *pgxpool.Pool {
+func NewMigratedPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	pool := NewPool(t)
 	if err := storage.Migrate(context.Background(), pool, slog.New(slog.DiscardHandler)); err != nil {
@@ -212,12 +212,12 @@ func NewMigratedPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func NewStore(t *testing.T) *storage.Store {
+func NewStore(t testing.TB) *storage.Store {
 	t.Helper()
 	return storage.New(NewMigratedPool(t))
 }
 
-func redisURL(t *testing.T) string {
+func redisURL(t testing.TB) string {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test skipped in short mode")
@@ -233,7 +233,7 @@ func redisURL(t *testing.T) string {
 	return redisContainer.dsn
 }
 
-func NewRedis(t *testing.T) *redis.Client {
+func NewRedis(t testing.TB) *redis.Client {
 	t.Helper()
 	opts, err := redis.ParseURL(redisURL(t))
 	if err != nil {
@@ -247,7 +247,7 @@ func NewRedis(t *testing.T) *redis.Client {
 	return client
 }
 
-func CreateUser(t *testing.T, store *storage.Store, email string) domain.User {
+func CreateUser(t testing.TB, store *storage.Store, email string) domain.User {
 	t.Helper()
 	id, err := uuid.NewV7()
 	if err != nil {

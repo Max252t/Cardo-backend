@@ -9,6 +9,13 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
+type RankDirection int
+
+const (
+	RankAfter RankDirection = iota
+	RankBefore
+)
+
 type Func func(ctx context.Context, tx Tx) error
 
 type Tx interface {
@@ -46,6 +53,8 @@ type Columns interface {
 	Column(ctx context.Context, id uuid.UUID) (domain.Column, error)
 	ColumnIDExists(ctx context.Context, id uuid.UUID) (bool, error)
 	ColumnRanks(ctx context.Context) ([]domain.RankedItem, error)
+	ColumnRankWindow(ctx context.Context, anchor uuid.UUID, dir RankDirection, exclude uuid.UUID) (anchorRank, neighbour string, found bool, err error)
+	ColumnLastRank(ctx context.Context, exclude uuid.UUID) (string, bool, error)
 	InsertColumn(ctx context.Context, c domain.Column) (domain.Column, error)
 	RenameColumn(ctx context.Context, id uuid.UUID, title string) (domain.Column, error)
 	MoveColumn(ctx context.Context, id uuid.UUID, rank string) (domain.Column, error)
@@ -57,6 +66,8 @@ type Cards interface {
 	Card(ctx context.Context, id uuid.UUID) (domain.Card, error)
 	CardIDExists(ctx context.Context, id uuid.UUID) (bool, error)
 	CardRanks(ctx context.Context, columnID uuid.UUID) ([]domain.RankedItem, error)
+	CardRankWindow(ctx context.Context, columnID, anchor uuid.UUID, dir RankDirection, exclude uuid.UUID) (anchorRank, neighbour string, found bool, err error)
+	CardLastRank(ctx context.Context, columnID, exclude uuid.UUID) (string, bool, error)
 	InsertCard(ctx context.Context, c domain.Card) (domain.Card, error)
 	EditCard(ctx context.Context, id, actorID uuid.UUID, edit domain.CardEdit) (domain.Card, error)
 	MoveCard(ctx context.Context, id, actorID, toColumnID uuid.UUID, rank string) (domain.Card, error)

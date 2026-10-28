@@ -69,3 +69,27 @@ func TestInstrumentPublisherCountsFailures(t *testing.T) {
 type failingPublisher struct{ err error }
 
 func (f failingPublisher) Publish(context.Context, []domain.Event) error { return f.err }
+
+func TestRetentionDeletedCountsByTable(t *testing.T) {
+	t.Parallel()
+	c := metrics.New()
+	c.Deleted("board_events", 5)
+	c.Deleted("board_events", 2)
+	c.Deleted("processed_ops", 3)
+
+	body := scrape(t, c)
+	assert.Contains(t, body, `retention_deleted_total{table="board_events"} 7`)
+	assert.Contains(t, body, `retention_deleted_total{table="processed_ops"} 3`)
+}
+
+func TestRESTRateLimitCounters(t *testing.T) {
+	t.Parallel()
+	c := metrics.New()
+	c.RateLimited()
+	c.RateLimited()
+	c.RateLimiterError()
+
+	body := scrape(t, c)
+	assert.Contains(t, body, "rest_rate_limited_total 2")
+	assert.Contains(t, body, "rest_rate_limiter_errors_total 1")
+}

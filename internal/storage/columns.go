@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
@@ -35,6 +36,27 @@ func (b *BoardTx) ColumnRanks(ctx context.Context) ([]domain.RankedItem, error) 
 	return queryAll(ctx, b.tx, scanRankedItem,
 		`SELECT id, rank FROM columns WHERE board_id = $1 AND archived_at IS NULL ORDER BY rank, id`,
 		b.board.ID)
+}
+
+const columnWindowSQL = `
+SELECT a.rank, COALESCE((
+  SELECT n.rank FROM columns n
+  WHERE n.board_id = a.board_id AND n.archived_at IS NULL AND n.id <> $3 AND n.rank %s a.rank
+  ORDER BY n.rank %s LIMIT 1
+), '')
+FROM columns a
+WHERE a.id = $2 AND a.board_id = $1 AND a.archived_at IS NULL`
+
+func (b *BoardTx) ColumnRankWindow(ctx context.Context, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) (string, string, bool, error) {
+	return b.queryWindow(ctx, windowSQL(columnWindowSQL, dir), b.board.ID, anchor, exclude)
+}
+
+func (b *BoardTx) ColumnLastRank(ctx context.Context, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM columns
+		 WHERE board_id = $1 AND archived_at IS NULL AND id <> $2
+		 ORDER BY rank DESC LIMIT 1`,
+		b.board.ID, exclude)
 }
 
 func (b *BoardTx) InsertColumn(ctx context.Context, c domain.Column) (domain.Column, error) {

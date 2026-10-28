@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Max252t/Cardo-backend/internal/boardtx"
 	"github.com/Max252t/Cardo-backend/internal/domain"
 )
 
@@ -36,6 +37,27 @@ func (b *BoardTx) CardRanks(ctx context.Context, columnID uuid.UUID) ([]domain.R
 	return queryAll(ctx, b.tx, scanRankedItem,
 		`SELECT id, rank FROM cards WHERE column_id = $1 AND board_id = $2 AND archived_at IS NULL ORDER BY rank, id`,
 		columnID, b.board.ID)
+}
+
+const cardWindowSQL = `
+SELECT a.rank, COALESCE((
+  SELECT n.rank FROM cards n
+  WHERE n.column_id = a.column_id AND n.board_id = a.board_id AND n.archived_at IS NULL AND n.id <> $4 AND n.rank %s a.rank
+  ORDER BY n.rank %s LIMIT 1
+), '')
+FROM cards a
+WHERE a.id = $3 AND a.column_id = $1 AND a.board_id = $2 AND a.archived_at IS NULL`
+
+func (b *BoardTx) CardRankWindow(ctx context.Context, columnID, anchor uuid.UUID, dir boardtx.RankDirection, exclude uuid.UUID) (string, string, bool, error) {
+	return b.queryWindow(ctx, windowSQL(cardWindowSQL, dir), columnID, b.board.ID, anchor, exclude)
+}
+
+func (b *BoardTx) CardLastRank(ctx context.Context, columnID, exclude uuid.UUID) (string, bool, error) {
+	return b.queryRank(ctx,
+		`SELECT rank FROM cards
+		 WHERE column_id = $1 AND board_id = $2 AND archived_at IS NULL AND id <> $3
+		 ORDER BY rank DESC LIMIT 1`,
+		columnID, b.board.ID, exclude)
 }
 
 func (b *BoardTx) InsertCard(ctx context.Context, c domain.Card) (domain.Card, error) {

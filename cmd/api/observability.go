@@ -9,12 +9,15 @@ import (
 	"github.com/Max252t/Cardo-backend/internal/metrics"
 	"github.com/Max252t/Cardo-backend/internal/ops"
 	"github.com/Max252t/Cardo-backend/internal/realtime"
+	"github.com/Max252t/Cardo-backend/internal/retention"
 )
 
 type observability struct {
 	ops       ops.Metrics
 	realtime  realtime.Metrics
 	http      httpapi.Metrics
+	retention retention.Metrics
+	rest      httpapi.RateLimitMetrics
 	handler   http.Handler
 	collector *metrics.Collector
 }
@@ -28,6 +31,8 @@ func newObservability(cfg config.Config) observability {
 		ops:       c,
 		realtime:  c,
 		http:      c,
+		retention: c,
+		rest:      c,
 		handler:   c.Handler(),
 		collector: c,
 	}
