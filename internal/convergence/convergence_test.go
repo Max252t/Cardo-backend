@@ -25,6 +25,10 @@ const (
 	opsEnv         = "CONVERGENCE_OPS"
 	quiescenceWait = 90 * time.Second
 	runDeadline    = 4 * time.Minute
+
+	losslessGapWait = 3 * time.Second
+	shortDivisor    = 4
+	shortMinimumOps = 20
 )
 
 func TestMain(m *testing.M) {
@@ -42,6 +46,7 @@ type scenario struct {
 	pruneEvents  bool
 	maxOpGap     time.Duration
 	idlePoll     time.Duration
+	gapWait      time.Duration
 	allowedNacks map[string]bool
 }
 
@@ -61,6 +66,9 @@ func opsFor(t *testing.T, def int) int {
 	t.Helper()
 	raw := os.Getenv(opsEnv)
 	if raw == "" {
+		if testing.Short() {
+			return max(def/shortDivisor, shortMinimumOps)
+		}
 		return def
 	}
 	n, err := strconv.Atoi(raw)
@@ -111,6 +119,7 @@ func startClients(t *testing.T, s *stack, sc scenario, seed int64, profile simcl
 			Seed:      seed + int64(i) + 1,
 			Profile:   profile,
 			IdlePoll:  sc.idlePoll,
+			GapWait:   sc.gapWait,
 			Logf:      t.Logf,
 		})
 		c.Start(ctx)
@@ -206,6 +215,9 @@ func runScenario(t *testing.T, sc scenario) {
 	lossless := sc.eventLoss == 0 && sc.blackoutOps == 0
 	if lossless && sc.idlePoll <= 0 {
 		sc.idlePoll = time.Hour
+	}
+	if lossless && !sc.pruneEvents && sc.gapWait <= 0 {
+		sc.gapWait = losslessGapWait
 	}
 	if sc.allowedNacks == nil {
 		sc.allowedNacks = baseNacks()
