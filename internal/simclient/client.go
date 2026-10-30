@@ -116,6 +116,8 @@ type Client struct {
 	startedAt   time.Time
 
 	gapDeadline time.Time
+	retryAt     time.Time
+	ctx         context.Context
 	reconnectAt time.Time
 	nextPoll    time.Time
 }
@@ -139,6 +141,7 @@ func New(cfg Config) *Client {
 	rng := rand.New(rand.NewSource(cfg.Seed))
 	return &Client{
 		cfg:     cfg,
+		ctx:     context.Background(),
 		rng:     rng,
 		gen:     &generator{rng: rng, name: cfg.Name, profile: cfg.Profile},
 		cmds:    make(chan func()),
@@ -228,6 +231,7 @@ func (c *Client) status() Status {
 }
 
 func (c *Client) loop(ctx context.Context) {
+	c.ctx = ctx
 	defer close(c.stopped)
 	defer func() {
 		st := c.status()
@@ -258,6 +262,10 @@ func (c *Client) loop(ctx context.Context) {
 }
 
 func (c *Client) onTick(ctx context.Context, now time.Time) {
+	if !c.retryAt.IsZero() && !now.Before(c.retryAt) {
+		c.retryAt = time.Time{}
+		c.reloadSnapshot(ctx)
+	}
 	if !c.reconnectAt.IsZero() && !now.Before(c.reconnectAt) {
 		c.connect(ctx)
 	}
@@ -468,7 +476,7 @@ func (c *Client) acceptEvent(env protocol.Envelope) {
 func (c *Client) applyEvent(env protocol.Envelope) {
 	if err := c.state.Apply(env); err != nil {
 		c.fail("%v", err)
-		c.gapDeadline = time.Now().Add(retryFetchDelay)
+		c.retryAt = time.Now().Add(retryFetchDelay)
 		return
 	}
 	c.stats.EventsApplied++
@@ -611,7 +619,7 @@ func (c *Client) onNack(env protocol.Envelope) {
 	case boardcontent.ReasonVersionConflict, boardcontent.ReasonNotFound:
 	case boardcontent.ReasonResyncRequired:
 		c.stats.ResyncRequired++
-		c.reloadSnapshot(context.Background())
+		c.reloadSnapshot(c.ctx)
 		c.resendPending()
 	default:
 		c.fail("unexpected nack %q: %s", nack.Reason, nack.Message)

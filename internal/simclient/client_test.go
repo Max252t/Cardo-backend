@@ -564,3 +564,21 @@ func TestTraceIsBounded(t *testing.T) {
 	assert.Len(t, c.trace, traceLimit)
 	assert.Contains(t, c.trace[len(c.trace)-1], "entry 899")
 }
+
+func TestApplyFailureSchedulesASnapshotReloadThatDrainDoesNotCancel(t *testing.T) {
+	c, api := newClientWithAPI(t)
+	col := uuid.New()
+	api.snapshot = func() (int, protocol.Snapshot) {
+		return http.StatusOK, protocol.Snapshot{Seq: 5, Columns: []boardcontent.Column{{ID: col, Title: "T", Rank: "m", Version: 1}}}
+	}
+	loadEmpty(c, 0)
+	c.acceptEvent(event(t, 1, boardcontent.EventCardEdited, nil, boardcontent.CardEdited{CardID: uuid.New(), Version: 2}))
+	require.False(t, c.retryAt.IsZero())
+	assert.Empty(t, c.buf)
+
+	c.onTick(context.Background(), c.retryAt.Add(time.Millisecond))
+
+	assert.True(t, c.retryAt.IsZero())
+	assert.Equal(t, int64(5), c.state.Seq)
+	assert.Contains(t, c.state.Columns, col)
+}
