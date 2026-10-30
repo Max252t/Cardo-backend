@@ -270,7 +270,7 @@ All settings come from environment variables; see `.env.example` for a ready-to-
 | `REST_RATE_BURST` | `40` | Burst size, between 1 and 1000000 when the limit is enabled. |
 | `LOG_LEVEL` | `info` | slog level: `debug`, `info`, `warn`, `error`. |
 
-Used only by `docker-compose.yml`: `POSTGRES_PASSWORD` (default `cardo`) and `GRAFANA_ADMIN_PASSWORD` (required, set in `.env.example`).
+Used only by `docker-compose.yml`: `POSTGRES_PASSWORD` (default `cardo`) and `GRAFANA_ADMIN_PASSWORD` (default `admin`; Grafana is bound to `127.0.0.1` and only starts with `--profile monitoring`).
 
 ## API overview
 
