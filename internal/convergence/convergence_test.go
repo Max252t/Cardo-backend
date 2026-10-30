@@ -379,7 +379,7 @@ func TestConvergenceRebalanceHotSpot(t *testing.T) {
 		clients:    3,
 		ops:        opsFor(t, 250),
 		dropChance: 0.02,
-		hotSpot:    0.97,
+		hotSpot:    1,
 		maxOpGap:   10 * time.Millisecond,
 	})
 }
