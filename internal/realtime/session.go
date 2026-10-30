@@ -175,7 +175,7 @@ func (c *Client) onOp(env protocol.Envelope) {
 		c.localNack(op.OpID, boardcontent.ReasonForbidden, msgRoleForbidsChanges)
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, c.hub.cfg.OpTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.ctx), c.hub.cfg.OpTimeout)
 	defer cancel()
 	out, err := c.hub.ops.Apply(ctx, c.member.UserID, c.boardID, op)
 	c.finishOp(op, out, err)
