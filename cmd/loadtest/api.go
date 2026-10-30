@@ -37,6 +37,7 @@ type account struct {
 	ID       uuid.UUID
 	Email    string
 	Token    string
+	Refresh  string
 	Password string
 }
 
@@ -44,7 +45,8 @@ type sessionResponse struct {
 	User struct {
 		ID uuid.UUID `json:"id"`
 	} `json:"user"`
-	AccessToken string `json:"access_token"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type boardResponse struct {
@@ -64,7 +66,7 @@ func retryable(status int) bool {
 	return status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable || status == http.StatusBadGateway
 }
 
-func (a *apiClient) call(ctx context.Context, method, path, token string, body, out any) error {
+func (a *apiClient) post(ctx context.Context, path, token string, body, out any) error {
 	var payload []byte
 	if body != nil {
 		var err error
@@ -73,7 +75,7 @@ func (a *apiClient) call(ctx context.Context, method, path, token string, body, 
 		}
 	}
 	for attempt := 0; ; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, method, a.base+path, bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.base+path, bytes.NewReader(payload))
 		if err != nil {
 			return err
 		}
@@ -85,7 +87,7 @@ func (a *apiClient) call(ctx context.Context, method, path, token string, body, 
 		}
 		resp, err := a.http.Do(req)
 		if err != nil {
-			return fmt.Errorf("%s %s: %w", method, path, err)
+			return fmt.Errorf("POST %s: %w", path, err)
 		}
 		data, readErr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
@@ -101,7 +103,7 @@ func (a *apiClient) call(ctx context.Context, method, path, token string, body, 
 			}
 		}
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(data)))
+			return fmt.Errorf("POST %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(data)))
 		}
 		if out != nil {
 			return json.Unmarshal(data, out)
@@ -112,7 +114,7 @@ func (a *apiClient) call(ctx context.Context, method, path, token string, body, 
 
 func (a *apiClient) register(ctx context.Context, email, name, password string) (account, error) {
 	var s sessionResponse
-	err := a.call(ctx, http.MethodPost, "/api/auth/register", "", map[string]string{
+	err := a.post(ctx, "/api/auth/register", "", map[string]string{
 		"email":        email,
 		"password":     password,
 		"display_name": name,
@@ -121,19 +123,19 @@ func (a *apiClient) register(ctx context.Context, email, name, password string) 
 	if err != nil {
 		return account{}, err
 	}
-	return account{ID: s.User.ID, Email: email, Token: s.AccessToken, Password: password}, nil
+	return account{ID: s.User.ID, Email: email, Token: s.AccessToken, Refresh: s.RefreshToken, Password: password}, nil
 }
 
 func (a *apiClient) createBoard(ctx context.Context, token, title string) (uuid.UUID, error) {
 	var b boardResponse
-	if err := a.call(ctx, http.MethodPost, "/api/boards", token, map[string]string{"title": title}, &b); err != nil {
+	if err := a.post(ctx, "/api/boards", token, map[string]string{"title": title}, &b); err != nil {
 		return uuid.Nil, err
 	}
 	return b.ID, nil
 }
 
 func (a *apiClient) addMember(ctx context.Context, token string, boardID uuid.UUID, email string) error {
-	return a.call(ctx, http.MethodPost, "/api/boards/"+boardID.String()+"/members", token,
+	return a.post(ctx, "/api/boards/"+boardID.String()+"/members", token,
 		map[string]string{"email": email, "role": memberRole}, nil)
 }
 
@@ -146,4 +148,12 @@ func (a *apiClient) wsURL(boardID uuid.UUID) string {
 		u = "ws://" + strings.TrimPrefix(u, "http://")
 	}
 	return u + "/ws/boards/" + boardID.String()
+}
+
+func (a *apiClient) refresh(ctx context.Context, refreshToken string) (string, string, error) {
+	var s sessionResponse
+	if err := a.post(ctx, "/api/auth/refresh", "", map[string]string{"refresh_token": refreshToken}, &s); err != nil {
+		return "", "", err
+	}
+	return s.AccessToken, s.RefreshToken, nil
 }

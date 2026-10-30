@@ -50,10 +50,10 @@ func TestExecuteRejectsUnknownFlagsAndBadValues(t *testing.T) {
 	}
 }
 
-func TestExecuteHelpExitsWithUsageCodeAndListsFlags(t *testing.T) {
+func TestExecuteHelpExitsSuccessfullyAndListsFlags(t *testing.T) {
 	code, _, stderr := runExecute("-h")
-	assert.Equal(t, exitUsage, code)
-	for _, flagName := range []string{"-url", "-clients", "-rate", "-duration", "-warmup", "-resync-events", "-resync-trials", "-p95-target", "-resync-target", "-json", "-enforce", "-seed", "-password"} {
+	assert.Equal(t, exitOK, code)
+	for _, flagName := range []string{"-url", "-clients", "-rate", "-duration", "-warmup", "-resync-events", "-resync-trials", "-p95-target", "-resync-target", "-json", "-enforce", "-seed", "-password", "-refresh-interval"} {
 		assert.Contains(t, stderr, flagName)
 	}
 }
@@ -204,8 +204,42 @@ func TestRunLongerThanTheAccessTokenLifetimeIsReportedAsFailureNotAsPass(t *test
 	assert.False(t, report.Passed())
 }
 
-func TestOptionsValidationRejectsRunsThatOutliveTheDefaultTokenTTL(t *testing.T) {
-	t.Skip("BUG: cmd/loadtest/run.go validate() accepts -duration beyond the 15 minute default ACCESS_TOKEN_TTL; the tool never sends auth.refresh, so the server closes every socket with a token-expired code mid-run and the resync phase re-dials with an expired token")
-	o := options{Clients: 5, Rate: 10, Duration: 20 * time.Minute, RegisterParallelism: 1}
-	assert.Error(t, o.validate())
+func TestRunSurvivesTheAccessTokenLifetimeWhenTokensAreRefreshed(t *testing.T) {
+	url := startAPIWithTTL(t, 4*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	report, err := run(ctx, options{
+		URL:                 url,
+		Clients:             3,
+		Rate:                20,
+		Duration:            7 * time.Second,
+		ResyncEvents:        20,
+		ResyncTrials:        1,
+		RegisterParallelism: 3,
+		RefreshInterval:     time.Second,
+		Seed:                1,
+		P95Target:           10 * time.Second,
+		ResyncTarget:        10 * time.Second,
+		Password:            defaultPassword,
+	}, io.Discard)
+	require.NoError(t, err)
+	assert.Empty(t, report.Failures)
+	assert.True(t, report.Passed())
+}
+
+func TestOptionsValidationBoundsTheRateAndRefreshInterval(t *testing.T) {
+	valid := options{Clients: 5, Rate: maxRate, Duration: time.Second, RegisterParallelism: 1}
+	assert.NoError(t, valid.validate())
+	valid.Rate = maxRate + 1
+	assert.Error(t, valid.validate())
+	valid.Rate = 10
+	valid.RefreshInterval = -time.Second
+	assert.Error(t, valid.validate())
+}
+
+func TestEmptyReportListsSerialiseAsArrays(t *testing.T) {
+	data, err := json.Marshal(Report{Resync: []ResyncTrial{}, Failures: []string{}})
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"resync":[]`)
+	assert.Contains(t, string(data), `"failures":[]`)
 }

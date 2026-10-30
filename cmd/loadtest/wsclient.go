@@ -71,7 +71,7 @@ func newWSClient(idx int, acc account, url string, col *collector, w *world) *ws
 func (c *wsClient) connect(ctx context.Context, lastSeq *int64) (handshakeResult, error) {
 	start := time.Now()
 	dialer := websocket.Dialer{HandshakeTimeout: dialTimeout}
-	conn, resp, err := dialer.DialContext(ctx, c.url, http.Header{"Authorization": {"Bearer " + c.acc.Token}})
+	conn, resp, err := dialer.DialContext(ctx, c.url, http.Header{"Authorization": {"Bearer " + c.accessToken()}})
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
@@ -254,4 +254,38 @@ func (c *wsClient) observe(ev protocol.Envelope) {
 	if c.isOwner {
 		c.world.apply(ev)
 	}
+}
+
+func (c *wsClient) accessToken() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.acc.Token
+}
+
+func (c *wsClient) refreshToken() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.acc.Refresh
+}
+
+func (c *wsClient) setTokens(access, refresh string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.acc.Token = access
+	c.acc.Refresh = refresh
+}
+
+func (c *wsClient) sendAuthRefresh() error {
+	c.mu.Lock()
+	conn := c.conn
+	token := c.acc.Token
+	c.mu.Unlock()
+	if conn == nil {
+		return nil
+	}
+	env, err := protocol.NewEnvelope(protocol.TypeAuthRefresh, protocol.AuthRefresh{AccessToken: token})
+	if err != nil {
+		return err
+	}
+	return c.write(conn, env)
 }

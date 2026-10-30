@@ -131,5 +131,5 @@ func (c *collector) nackCounts() map[string]int {
 func (c *collector) failureList() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return append([]string(nil), c.failures...)
+	return append([]string{}, c.failures...)
 }

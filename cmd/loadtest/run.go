@@ -24,6 +24,7 @@ const (
 	settleTimeout    = 10 * time.Second
 	catchUpTimeout   = 10 * time.Second
 	defaultPassword  = "loadtest-password-1"
+	maxRate          = 10000
 )
 
 type options struct {
@@ -35,6 +36,7 @@ type options struct {
 	ResyncEvents        int
 	ResyncTrials        int
 	RegisterParallelism int
+	RefreshInterval     time.Duration
 	Seed                int64
 	P95Target           time.Duration
 	ResyncTarget        time.Duration
@@ -45,8 +47,10 @@ func (o options) validate() error {
 	switch {
 	case o.Clients < 2:
 		return errors.New("clients must be at least 2")
-	case o.Rate <= 0:
-		return errors.New("rate must be positive")
+	case o.Rate <= 0 || o.Rate > maxRate:
+		return fmt.Errorf("rate must be between 0 and %d", maxRate)
+	case o.RefreshInterval < 0:
+		return errors.New("refresh-interval must not be negative")
 	case o.Duration <= 0:
 		return errors.New("duration must be positive")
 	case o.ResyncTrials < 0 || o.ResyncEvents < 0:
@@ -85,6 +89,8 @@ func run(ctx context.Context, opts options, progress io.Writer) (Report, error) 
 	}
 	r.report = Report{
 		StartedAt: time.Now().UTC(),
+		Resync:    []ResyncTrial{},
+		Failures:  []string{},
 		Config: ConfigInfo{
 			URL:          opts.URL,
 			Clients:      opts.Clients,
@@ -104,6 +110,8 @@ func run(ctx context.Context, opts options, progress io.Writer) (Report, error) 
 	if err := r.setup(ctx); err != nil {
 		return r.report, err
 	}
+	stopRefresh := r.startRefresh(ctx)
+	defer stopRefresh()
 	if err := r.warmupAndMeasure(ctx); err != nil {
 		return r.report, err
 	}
@@ -433,5 +441,46 @@ func (r *runner) finish() {
 		ResyncLimitMs: ms(r.opts.ResyncTarget),
 		P95Pass:       all.Count > 0 && all.P95Ms < ms(r.opts.P95Target),
 		ResyncPass:    r.report.ResyncMaxMs < ms(r.opts.ResyncTarget),
+	}
+}
+
+func (r *runner) startRefresh(ctx context.Context) func() {
+	if r.opts.RefreshInterval <= 0 {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(r.opts.RefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				r.refreshAll(ctx)
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func (r *runner) refreshAll(ctx context.Context) {
+	for _, c := range r.clients {
+		access, refresh, err := r.api.refresh(ctx, c.refreshToken())
+		if err != nil {
+			if ctx.Err() == nil {
+				r.col.failure(fmt.Sprintf("client %d token refresh: %v", c.idx, err))
+			}
+			continue
+		}
+		c.setTokens(access, refresh)
+		if err := c.sendAuthRefresh(); err != nil && ctx.Err() == nil {
+			r.col.failure(fmt.Sprintf("client %d auth.refresh: %v", c.idx, err))
+		}
 	}
 }

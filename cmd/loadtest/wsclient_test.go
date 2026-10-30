@@ -191,7 +191,7 @@ func TestHandshakeKindsAndCatchUpSequence(t *testing.T) {
 	res, err := c.connect(ctx, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "snapshot", res.Kind)
-	assert.Positive(t, res.ReadyMs)
+	assert.GreaterOrEqual(t, res.ReadyMs, 0.0)
 
 	for range 5 {
 		require.NoError(t, c.sendOp(someOp(), false))

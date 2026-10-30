@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -41,10 +42,14 @@ func execute(args []string, stdout, stderr io.Writer) int {
 	fs.Int64Var(&opts.Seed, "seed", time.Now().UnixNano(), "seed for the operation mix")
 	fs.DurationVar(&opts.P95Target, "p95-target", 200*time.Millisecond, "latency target for the 95th percentile")
 	fs.DurationVar(&opts.ResyncTarget, "resync-target", 2*time.Second, "resync time target")
+	fs.DurationVar(&opts.RefreshInterval, "refresh-interval", 5*time.Minute, "how often access tokens are renewed (0 disables); keep it below the server ACCESS_TOKEN_TTL")
 	fs.StringVar(&opts.Password, "password", defaultPassword, "password for the generated users")
 	fs.BoolVar(&asJSON, "json", false, "print the report as JSON instead of text")
 	fs.BoolVar(&enforce, "enforce", false, "exit with status 2 when a target is missed")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK
+		}
 		return exitUsage
 	}
 
