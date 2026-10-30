@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ const (
 	writeTimeout      = 5 * time.Second
 	retryFetchDelay   = 250 * time.Millisecond
 	inboxSize         = 1 << 14
+	traceLimit        = 300
 )
 
 type Config struct {
@@ -61,6 +63,7 @@ type Stats struct {
 	Buffered        int
 	Nacks           map[string]int
 	Failures        []string
+	Trace           []string
 }
 
 type Status struct {
@@ -109,6 +112,8 @@ type Client struct {
 	dirty       bool
 	buf         map[int64]protocol.Envelope
 	stats       Stats
+	trace       []string
+	startedAt   time.Time
 
 	gapDeadline time.Time
 	reconnectAt time.Time
@@ -210,6 +215,7 @@ func (c *Client) status() Status {
 		stats.Nacks[k] = v
 	}
 	stats.Failures = append([]string(nil), c.stats.Failures...)
+	stats.Trace = append([]string(nil), c.trace...)
 	stats.Buffered = len(c.buf)
 	return Status{
 		Live:        c.live,
@@ -234,6 +240,7 @@ func (c *Client) loop(ctx context.Context) {
 	}()
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
+	c.startedAt = time.Now()
 	c.nextPoll = time.Now().Add(c.cfg.IdlePoll)
 	c.connect(ctx)
 	for {
@@ -257,6 +264,7 @@ func (c *Client) onTick(ctx context.Context, now time.Time) {
 	if !c.gapDeadline.IsZero() && !now.Before(c.gapDeadline) {
 		c.gapDeadline = time.Time{}
 		c.stats.GapFetches++
+		c.note("gap fetch state.seq=%d buffered=%v", c.state.Seq, c.bufferedSeqs())
 		c.fetchEvents(ctx, fetchGap)
 	}
 	if !now.Before(c.nextPoll) {
@@ -265,6 +273,13 @@ func (c *Client) onTick(ctx context.Context, now time.Time) {
 			c.fetchEvents(ctx, fetchPoll)
 		}
 	}
+}
+
+func (c *Client) note(format string, args ...any) {
+	if len(c.trace) >= traceLimit {
+		c.trace = c.trace[1:]
+	}
+	c.trace = append(c.trace, fmt.Sprintf("%7dms ", time.Since(c.startedAt).Milliseconds())+fmt.Sprintf(format, args...))
 }
 
 func (c *Client) fail(format string, args ...any) {
@@ -303,6 +318,7 @@ func (c *Client) connect(ctx context.Context) {
 	}
 	c.connGen++
 	c.conn = conn
+	c.note("connected gen=%d to %s state.seq=%d initialized=%v pending=%d", c.connGen, url, c.state.Seq, c.initialized, len(c.pending))
 	c.live = false
 	c.stats.Reconnects++
 	c.buf = make(map[int64]protocol.Envelope)
@@ -336,6 +352,7 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, gen int) {
 }
 
 func (c *Client) disconnect(delay time.Duration) {
+	c.note("disconnect gen=%d state.seq=%d", c.connGen, c.state.Seq)
 	if c.conn != nil {
 		_ = c.conn.UnderlyingConn().Close()
 		_ = c.conn.Close()
@@ -396,6 +413,11 @@ func (c *Client) handle(env protocol.Envelope) {
 			c.fail("decode sync.delta: %v", err)
 			return
 		}
+		if n := len(delta.Events); n > 0 {
+			c.note("delta %d events seq %d..%d", n, delta.Events[0].Seq, delta.Events[n-1].Seq)
+		} else {
+			c.note("delta empty")
+		}
 		for _, ev := range delta.Events {
 			c.acceptEvent(ev)
 		}
@@ -405,6 +427,7 @@ func (c *Client) handle(env protocol.Envelope) {
 			c.fail("decode sync.snapshot: %v", err)
 			return
 		}
+		c.note("snapshot seq=%d", snap.Seq)
 		c.loadSnapshot(snap)
 	case protocol.TypeSyncReady:
 		c.onReady()
@@ -433,6 +456,7 @@ func (c *Client) acceptEvent(env protocol.Envelope) {
 	if env.Seq > c.state.Seq+1 {
 		c.buf[env.Seq] = env
 		if c.gapDeadline.IsZero() {
+			c.note("gap opened: state.seq=%d received seq=%d", c.state.Seq, env.Seq)
 			c.gapDeadline = time.Now().Add(c.cfg.GapWait)
 		}
 		return
@@ -498,6 +522,7 @@ func (c *Client) loadSnapshot(snap protocol.Snapshot) {
 }
 
 func (c *Client) onReady() {
+	c.note("ready state.seq=%d buffered=%d pending=%d", c.state.Seq, len(c.buf), len(c.pending))
 	c.live = true
 	c.rebase()
 	c.resendPending()
@@ -670,4 +695,16 @@ func (c *Client) fetchEvents(ctx context.Context, source fetchSource) {
 	if len(c.buf) > 0 && c.gapDeadline.IsZero() {
 		c.gapDeadline = time.Now().Add(c.cfg.GapWait)
 	}
+}
+
+func (c *Client) bufferedSeqs() []int64 {
+	out := make([]int64, 0, len(c.buf))
+	for seq := range c.buf {
+		out = append(out, seq)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	if len(out) > 6 {
+		out = out[:6]
+	}
+	return out
 }
