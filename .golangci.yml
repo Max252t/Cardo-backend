@@ -106,7 +106,7 @@ linters:
         linters:
           - gosec
           - unparam
-      - path: internal/simclient/
+      - path: (internal/simclient|cmd/loadtest)/
         linters:
           - gosec
 
