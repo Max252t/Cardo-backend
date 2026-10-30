@@ -8,6 +8,7 @@ linters:
   default: standard
   enable:
     - bodyclose
+    - depguard
     - errorlint
     - gocritic
     - gosec
@@ -19,6 +20,77 @@ linters:
     - unconvert
     - unparam
   settings:
+    depguard:
+      rules:
+        inner-layer:
+          list-mode: strict
+          files:
+            - "!$test"
+            - "**/internal/domain/**"
+            - "**/internal/rank/**"
+            - "**/internal/boardcontent/**"
+            - "**/internal/boardtx/**"
+            - "**/internal/boardevents/**"
+            - "**/internal/clock/**"
+            - "**/internal/secrets/**"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+            - github.com/Max252t/Cardo-backend/internal/domain
+            - github.com/Max252t/Cardo-backend/internal/rank
+            - github.com/Max252t/Cardo-backend/internal/boardcontent
+            - github.com/Max252t/Cardo-backend/internal/boardtx
+            - github.com/Max252t/Cardo-backend/internal/boardevents
+            - github.com/Max252t/Cardo-backend/internal/clock
+            - github.com/Max252t/Cardo-backend/internal/secrets
+        use-cases:
+          list-mode: strict
+          files:
+            - "!$test"
+            - "**/internal/ops/**"
+            - "**/internal/boards/**"
+            - "**/internal/users/**"
+            - "**/internal/auth/**"
+            - "**/internal/presence/**"
+            - "**/internal/members/**"
+            - "**/internal/retention/**"
+          allow:
+            - $gostd
+            - github.com/google/uuid
+            - github.com/Max252t/Cardo-backend/internal/domain
+            - github.com/Max252t/Cardo-backend/internal/rank
+            - github.com/Max252t/Cardo-backend/internal/boardcontent
+            - github.com/Max252t/Cardo-backend/internal/boardtx
+            - github.com/Max252t/Cardo-backend/internal/boardevents
+            - github.com/Max252t/Cardo-backend/internal/clock
+            - github.com/Max252t/Cardo-backend/internal/secrets
+        production-code:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/internal/realtime/rttest/**"
+            - "!**/internal/testutil/**"
+            - "!**/internal/simclient/**"
+          deny:
+            - pkg: github.com/Max252t/Cardo-backend/internal/realtime/rttest
+              desc: test support must not be imported by production code
+            - pkg: github.com/Max252t/Cardo-backend/internal/testutil
+              desc: test support must not be imported by production code
+            - pkg: github.com/Max252t/Cardo-backend/internal/simclient
+              desc: test support must not be imported by production code
+        metrics-adapter:
+          list-mode: lax
+          files:
+            - "$all"
+            - "!$test"
+            - "!**/cmd/api/**"
+            - "!**/internal/metrics/**"
+          deny:
+            - pkg: github.com/Max252t/Cardo-backend/internal/metrics
+              desc: the metrics adapter may only be wired in cmd/api
+            - pkg: github.com/prometheus
+              desc: Prometheus may only be used inside internal/metrics
     revive:
       rules:
         - name: exported
@@ -34,6 +106,9 @@ linters:
         linters:
           - gosec
           - unparam
+      - path: (internal/simclient|cmd/loadtest)/
+        linters:
+          - gosec
 
 formatters:
   enable:
