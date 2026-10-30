@@ -71,10 +71,13 @@ linters:
             - "!$test"
             - "!**/internal/realtime/rttest/**"
             - "!**/internal/testutil/**"
+            - "!**/internal/simclient/**"
           deny:
             - pkg: github.com/Max252t/Cardo-backend/internal/realtime/rttest
               desc: test support must not be imported by production code
             - pkg: github.com/Max252t/Cardo-backend/internal/testutil
+              desc: test support must not be imported by production code
+            - pkg: github.com/Max252t/Cardo-backend/internal/simclient
               desc: test support must not be imported by production code
         metrics-adapter:
           list-mode: lax
@@ -103,6 +106,9 @@ linters:
         linters:
           - gosec
           - unparam
+      - path: internal/simclient/
+        linters:
+          - gosec
 
 formatters:
   enable:
