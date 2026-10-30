@@ -33,13 +33,18 @@ func TestMain(m *testing.M) {
 
 func startAPI(t *testing.T) string {
 	t.Helper()
+	return startAPIWithTTL(t, time.Hour)
+}
+
+func startAPIWithTTL(t *testing.T, ttl time.Duration) string {
+	t.Helper()
 	gin.SetMode(gin.ReleaseMode)
 	store := testutil.NewStore(t)
 	jwt := jwtauth.New(jwtauth.Config{
 		Secret:   []byte("0123456789abcdef0123456789abcdef"),
 		Issuer:   "loadtest",
 		Audience: "loadtest",
-		TTL:      time.Hour,
+		TTL:      ttl,
 	}, nil)
 	authSvc := auth.NewService(auth.Deps{
 		Store:      store,
