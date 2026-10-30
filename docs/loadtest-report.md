@@ -40,10 +40,12 @@ Host port 8080 was already taken by another project, so nginx was published on 1
 ## Command lines
 
 ```
-docker compose -f docker-compose.yml -f compose.ports.yml up --build -d
+docker compose up --build -d
 go build -o loadtest ./cmd/loadtest
 ./loadtest -url http://localhost:18080
 ```
+
+Port 8080 was taken by another container on the measuring machine, so nginx was published on 18080 with a local compose override; with the committed `docker-compose.yml` use `-url http://localhost:8080`.
 
 The second command uses the defaults: 50 clients, 20 ops/s, 60 s measured after 5 s warm-up, 1000 events missed per resync, 3 resync trials. The headroom run used `./loadtest -url http://localhost:18080 -rate 100 -duration 30s -resync-trials 1`. `-json` prints the report as JSON and `-enforce` exits with status 2 when a target is missed.
 
@@ -105,6 +107,6 @@ Latency does not grow at 100 ops/s, which means the 20 ops/s target is far from 
 
 - Generator and system under test share one machine, so the numbers contain no real network latency beyond the Docker Desktop port forwarding and the WSL2 virtual network. They measure the cost of the server, Postgres commit, Redis pub/sub and the nginx hop.
 - Docker Desktop on Windows adds a user-space forwarding layer for published ports and a virtualised network for the container-to-container traffic. On Linux with native Docker the same stack should be equal or faster: a lower and tighter p99, and no first-call penalty from the virtualised disk. Cross-host deployments will add the real round-trip time of the network between client and nginx to every figure; the server-side part measured here is the budget that is left after that.
-- Access tokens live 15 minutes (`ACCESS_TOKEN_TTL`); the tool does not refresh them, so a single run must stay under that, which is plenty for the defaults.
+- Access tokens live 15 minutes (`ACCESS_TOKEN_TTL`). The measured runs were shorter than that; the tool now also refreshes tokens every `-refresh-interval` (default 5m), so longer runs are possible.
 - Every run creates new users and a new board. Run `docker compose down -v` to reset the data.
 - No target was missed, so there is no deviation to explain.

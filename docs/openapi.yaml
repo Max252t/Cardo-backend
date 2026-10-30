@@ -1,0 +1,1659 @@
+openapi: 3.1.0
+info:
+  title: Cardo API
+  version: 1.0.0
+  summary: REST and WebSocket API of the Cardo collaborative Kanban backend.
+  description: |
+    REST endpoints for authentication, profile, boards, board snapshots, the event log, members and invites,
+    plus the WebSocket entry point for real-time board sync.
+
+    All board content mutations (cards and columns) go through the WebSocket protocol, not REST. OpenAPI cannot
+    describe the WebSocket message protocol; it is documented in the README section "WebSocket protocol".
+    The event payloads that arrive over WebSocket are the same objects returned by the event log endpoint and
+    are described here as the `Event` schemas.
+
+    Every error response uses the unified body `{"error": {"code": "...", "message": "..."}}`. Requests for an
+    unknown route get `404 not_found`, and a known route called with an unsupported method gets
+    `405 method_not_allowed`, both in the same format. Every endpoint can additionally answer `500 internal`.
+
+    The Prometheus `/metrics` endpoint is not part of this API: it is served on a separate listener
+    (`METRICS_ADDR`) and is not reachable through nginx.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: http://localhost:8080
+    description: Docker Compose stack behind nginx
+tags:
+  - name: System
+    description: Liveness and readiness probes.
+  - name: Auth
+    description: Registration, login and refresh token rotation.
+  - name: Profile
+    description: The authenticated user's profile.
+  - name: Boards
+    description: Boards, snapshots and the event log.
+  - name: Members
+    description: Board roster management.
+  - name: Invites
+    description: Invite links for boards.
+  - name: WebSocket
+    description: Real-time board connection.
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      tags: [System]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: The process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /readyz:
+    get:
+      operationId: readyz
+      tags: [System]
+      summary: Readiness probe
+      description: |
+        Pings PostgreSQL and Redis. While the server is draining before shutdown (`SHUTDOWN_DRAIN_DELAY`) it
+        answers `503 shutting_down` so the load balancer stops routing new traffic to the instance.
+      security: []
+      responses:
+        "200":
+          description: All dependencies are reachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+        "503":
+          description: A dependency is unavailable (`not_ready`) or the server is shutting down (`shutting_down`).
+          headers:
+            Retry-After:
+              description: Present only for `shutting_down`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+  /api/auth/register:
+    post:
+      operationId: register
+      tags: [Auth]
+      summary: Register a user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: The user was created and a token pair issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: The email is already registered (`email_taken`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/auth/login:
+    post:
+      operationId: login
+      tags: [Auth]
+      summary: Log in with email and password
+      description: |
+        Failed attempts are limited per email and client IP (`LOGIN_MAX_FAILURES` within `LOGIN_FAILURE_WINDOW`).
+        When the limit is hit the response is `429 rate_limited` with `Retry-After`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Credentials accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Wrong email or password (`invalid_credentials`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/auth/refresh:
+    post:
+      operationId: refreshTokens
+      tags: [Auth]
+      summary: Rotate the refresh token
+      description: |
+        Returns a new token pair and invalidates the presented refresh token. Presenting an already used refresh
+        token revokes the whole session family and answers `401 token_reused`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: A new token pair. The `user` field is not included.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: The refresh token is invalid (`invalid_token`), expired (`token_expired`) or was reused (`token_reused`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/auth/logout:
+    post:
+      operationId: logout
+      tags: [Auth]
+      summary: Revoke a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: The refresh token was revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/me:
+    get:
+      operationId: getMe
+      tags: [Profile]
+      summary: Get the current user
+      responses:
+        "200":
+          description: The current user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: updateMe
+      tags: [Profile]
+      summary: Update the current user's profile
+      description: At least one of `display_name` and `avatar_color` must be present.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/boards:
+    get:
+      operationId: listBoards
+      tags: [Boards]
+      summary: List the boards the user is a member of
+      responses:
+        "200":
+          description: Boards with the caller's role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BoardList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createBoard
+      tags: [Boards]
+      summary: Create a board
+      description: The caller becomes the owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardTitleRequest"
+      responses:
+        "201":
+          description: The created board.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Board"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/boards/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+    get:
+      operationId: getBoard
+      tags: [Boards]
+      summary: Get a board snapshot
+      description: |
+        Full board state: board info with the caller's role, active columns and cards, members and the board `seq`
+        the snapshot corresponds to. A client that applies this snapshot continues with events where `seq` is
+        greater than the snapshot `seq`.
+      responses:
+        "200":
+          description: The board snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snapshot"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      operationId: renameBoard
+      tags: [Boards]
+      summary: Rename a board
+      description: Owner only. Emits a `board.renamed` event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BoardTitleRequest"
+      responses:
+        "200":
+          description: The renamed board.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Board"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: deleteBoard
+      tags: [Boards]
+      summary: Delete a board
+      description: Owner only. Soft delete. Emits a `board.deleted` event and closes open WebSockets with code 4004.
+      responses:
+        "204":
+          description: The board was deleted.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/boards/{id}/events:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+    get:
+      operationId: listBoardEvents
+      tags: [Boards]
+      summary: Read the event log after a sequence number
+      description: |
+        Returns up to 1000 events with `seq` greater than `after_seq`, ordered by `seq`. When `has_more` is true,
+        repeat the request with the last returned `seq`. `after_seq` equal to the current board `seq` returns an
+        empty page; a larger value is a validation error.
+
+        Events are retained for `EVENTS_RETENTION` (and never fewer than `EVENTS_KEEP_MIN` per board). When
+        `after_seq` is older than the oldest retained event the answer is `410 gone` and the client must reload
+        the snapshot.
+      parameters:
+        - $ref: "#/components/parameters/AfterSeq"
+      responses:
+        "200":
+          description: A page of events.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventsPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          description: The requested events are no longer retained (`gone`). Load a snapshot instead.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/boards/{id}/members:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+    get:
+      operationId: listMembers
+      tags: [Members]
+      summary: List board members
+      description: Any member.
+      responses:
+        "200":
+          description: The roster.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: addMember
+      tags: [Members]
+      summary: Add an existing user to the board
+      description: Owner only. Emits `member.added`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddMemberRequest"
+      responses:
+        "201":
+          description: The new member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The board is not visible to the caller, or no user has this email (`not_found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The user is already a member (`already_member`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/boards/{id}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+      - $ref: "#/components/parameters/UserId"
+    patch:
+      operationId: changeMemberRole
+      tags: [Members]
+      summary: Change a member's role
+      description: |
+        Owner only. The owner's own role cannot be changed (`403 forbidden`). Setting the current role is a
+        no-op without an event; otherwise `member.role_changed` is emitted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeRoleRequest"
+      responses:
+        "200":
+          description: The member after the change.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: removeMember
+      tags: [Members]
+      summary: Remove a member or leave the board
+      description: |
+        The owner can remove anyone except themselves; any other member can remove only themselves. The owner
+        cannot leave (`403 forbidden`). Emits `member.removed` and closes that user's WebSockets with code 4003.
+      responses:
+        "204":
+          description: The member was removed.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/boards/{id}/invites:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+    get:
+      operationId: listInvites
+      tags: [Invites]
+      summary: List active invites
+      description: Owner only. Tokens are never returned here.
+      responses:
+        "200":
+          description: Active invites.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: createInvite
+      tags: [Invites]
+      summary: Create an invite
+      description: |
+        Owner only. The raw token is returned exactly once; only its SHA-256 is stored. `role` is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInviteRequest"
+      responses:
+        "201":
+          description: The invite including its one-time token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedInvite"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/boards/{id}/invites/{inviteId}:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+      - $ref: "#/components/parameters/InviteId"
+    delete:
+      operationId: revokeInvite
+      tags: [Invites]
+      summary: Revoke an invite
+      description: Owner only.
+      responses:
+        "204":
+          description: The invite was revoked.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/invites/{token}/accept:
+    parameters:
+      - $ref: "#/components/parameters/InviteToken"
+    post:
+      operationId: acceptInvite
+      tags: [Invites]
+      summary: Accept an invite
+      description: |
+        Atomically checks that the invite is not revoked, not expired, has uses left and that the board is not
+        deleted, then consumes one use and adds the caller with the invite's role (`member.added`).
+
+        A caller who is already a member gets `200` with the board and their current role, even when the invite
+        has since been revoked, expired or exhausted; no use is consumed and no event is emitted.
+
+        The token travels in the path, so request logs and nginx access logs do not record this path.
+      responses:
+        "200":
+          description: The board the caller now belongs to, with the caller's role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Board"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          description: The invite is revoked, expired or exhausted (`invite_unavailable`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /ws/boards/{id}:
+    parameters:
+      - $ref: "#/components/parameters/BoardId"
+    get:
+      operationId: connectBoardSocket
+      tags: [WebSocket]
+      summary: Open the real-time board WebSocket
+      description: |
+        Upgrades to a WebSocket after authenticating the bearer token and checking board membership. Native
+        clients send the token in the `Authorization: Bearer` header. A missing or invalid token gets `401`; a
+        user who is not a member of the board, or a board that does not exist, gets `404` so board existence is
+        not leaked; a rejected `Origin` gets `403`. The WebSocket route is not subject to the per-user REST rate
+        limit.
+
+        After the upgrade the client sends `hello`, receives `sync.delta` or `sync.snapshot`, `presence.list`
+        and `sync.ready`, and then exchanges operations and events. OpenAPI cannot describe this message
+        protocol; see the "WebSocket protocol" section of the README for the envelope, message types, nack
+        reasons and close codes.
+      responses:
+        "101":
+          description: Switching protocols. The connection speaks protocol envelope v1.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The `Origin` header is not allowed (`forbidden`). Native clients that send no `Origin` are always accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          description: The server is shutting down (`shutting_down`). Reconnect, the load balancer will route to another instance.
+          headers:
+            Retry-After:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from login, register or refresh. Access tokens live `ACCESS_TOKEN_TTL` (15 minutes by default).
+  parameters:
+    BoardId:
+      name: id
+      in: path
+      required: true
+      description: Board ID.
+      schema:
+        type: string
+        format: uuid
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: ID of the member.
+      schema:
+        type: string
+        format: uuid
+    InviteId:
+      name: inviteId
+      in: path
+      required: true
+      description: Invite ID.
+      schema:
+        type: string
+        format: uuid
+    InviteToken:
+      name: token
+      in: path
+      required: true
+      description: Raw invite token, base64url, returned once when the invite is created.
+      schema:
+        type: string
+    AfterSeq:
+      name: after_seq
+      in: query
+      required: true
+      description: Return events with a greater `seq`.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+  responses:
+    BadRequest:
+      description: |
+        The body is not valid JSON (`bad_request`), a field failed validation or a path parameter is not a UUID
+        (`validation_error`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: |
+        The bearer token is missing (`unauthorized`), invalid (`invalid_token`) or expired (`token_expired`), or
+        the user no longer exists (`unauthorized`).
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: The caller's role does not allow this action (`forbidden`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: |
+        The resource does not exist or is not visible to the caller (`not_found`). Boards the caller is not a
+        member of are indistinguishable from missing boards.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    PayloadTooLarge:
+      description: The request body exceeds `HTTP_MAX_BODY_BYTES` (`payload_too_large`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    TooManyRequests:
+      description: |
+        `rate_limited`. For login this is the failed-attempt limit; for authenticated routes it is the per-user
+        REST rate limit (`REST_RATE_LIMIT`, `REST_RATE_BURST`).
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unavailable:
+      description: |
+        The server is busy (`busy`, a board lock could not be acquired within `DB_LOCK_TIMEOUT`) or overloaded
+        (`overloaded`, too many concurrent password hashes). Retry shortly.
+      headers:
+        Retry-After:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Unexpected failure (`internal`).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    ErrorCode:
+      type: string
+      description: Machine-readable error code.
+      enum:
+        - bad_request
+        - validation_error
+        - unauthorized
+        - invalid_token
+        - token_expired
+        - token_reused
+        - invalid_credentials
+        - forbidden
+        - not_found
+        - method_not_allowed
+        - email_taken
+        - payload_too_large
+        - rate_limited
+        - not_ready
+        - overloaded
+        - busy
+        - shutting_down
+        - gone
+        - already_member
+        - invite_unavailable
+        - internal
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    ReadinessResponse:
+      type: object
+      required: [checks]
+      properties:
+        status:
+          type: string
+          const: ok
+          description: Present only when ready.
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+        checks:
+          type: object
+          description: Result per dependency (`postgres`, `redis`), `ok` or `unavailable`. Empty while shutting down.
+          additionalProperties:
+            type: string
+            enum: [ok, unavailable]
+    Role:
+      type: string
+      enum: [owner, editor, viewer]
+    AssignableRole:
+      type: string
+      enum: [editor, viewer]
+    User:
+      type: object
+      required: [id, email, display_name, avatar_color, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        avatar_color:
+          type: string
+          pattern: "^#[0-9A-F]{6}$"
+        created_at:
+          type: string
+          format: date-time
+    RegisterRequest:
+      type: object
+      required: [email, password, display_name]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        avatar_color:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+          description: Optional. When omitted a color is derived from the email.
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          minLength: 1
+    UpdateProfileRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        avatar_color:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+    TokenResponse:
+      type: object
+      required: [token_type, access_token, access_expires_at, expires_in, refresh_token, refresh_expires_at]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token_type:
+          type: string
+          const: Bearer
+        access_token:
+          type: string
+        access_expires_at:
+          type: string
+          format: date-time
+        expires_in:
+          type: integer
+          format: int64
+          description: Seconds until the access token expires.
+        refresh_token:
+          type: string
+        refresh_expires_at:
+          type: string
+          format: date-time
+    BoardTitleRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+    Board:
+      type: object
+      required: [id, title, owner_id, seq, role, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
+          description: Sequence number of the latest board event.
+        role:
+          $ref: "#/components/schemas/Role"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BoardList:
+      type: object
+      required: [boards]
+      properties:
+        boards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Board"
+    BoardInfo:
+      type: object
+      required: [id, title, owner_id, role, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/Role"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Column:
+      type: object
+      required: [id, title, rank, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          maxLength: 200
+        rank:
+          type: string
+          description: Fractional index, base62. Columns are ordered by `rank` ascending.
+        version:
+          type: integer
+          format: int64
+    Card:
+      type: object
+      required: [id, column_id, title, description, rank, version, description_version, created_by, updated_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        column_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          maxLength: 500
+        description:
+          type: string
+          maxLength: 10000
+        rank:
+          type: string
+          description: Fractional index, base62. Cards of a column are ordered by `rank` ascending.
+        version:
+          type: integer
+          format: int64
+          description: Optimistic concurrency version for moves.
+        description_version:
+          type: integer
+          format: int64
+          description: Optimistic concurrency version for description edits.
+        created_by:
+          type: string
+          format: uuid
+        updated_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Member:
+      type: object
+      required: [user_id, display_name, avatar_color, role, joined_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        avatar_color:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        joined_at:
+          type: string
+          format: date-time
+    MemberList:
+      type: object
+      required: [members]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+    Snapshot:
+      type: object
+      required: [board, columns, cards, members, seq]
+      properties:
+        board:
+          $ref: "#/components/schemas/BoardInfo"
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/Column"
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Card"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+        seq:
+          type: integer
+          format: int64
+          description: Board sequence number the snapshot reflects.
+    AddMemberRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/AssignableRole"
+    ChangeRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: "#/components/schemas/AssignableRole"
+    CreateInviteRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: "#/components/schemas/AssignableRole"
+        expires_in:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2592000
+          description: Lifetime in seconds. Defaults to 7 days, at most 30 days.
+        max_uses:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Defaults to 1.
+    Invite:
+      type: object
+      required: [id, role, expires_at, max_uses, uses]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/AssignableRole"
+        expires_at:
+          type: string
+          format: date-time
+        max_uses:
+          type: integer
+        uses:
+          type: integer
+    CreatedInvite:
+      allOf:
+        - $ref: "#/components/schemas/Invite"
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+              description: 256 bits of randomness, base64url. Shown only once.
+    InviteList:
+      type: object
+      required: [invites]
+      properties:
+        invites:
+          type: array
+          items:
+            $ref: "#/components/schemas/Invite"
+    EventsPage:
+      type: object
+      required: [events, seq, has_more]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        seq:
+          type: integer
+          format: int64
+          description: Current board sequence number.
+        has_more:
+          type: boolean
+          description: True when more events follow the last returned one.
+    EventBase:
+      type: object
+      required: [v, type, seq, server_ts, payload]
+      properties:
+        v:
+          type: integer
+          const: 1
+          description: Protocol envelope version.
+        op_id:
+          type: string
+          format: uuid
+          description: The operation that produced the event. Absent for events without an originating operation, such as REST-originated changes and rebalance events.
+        seq:
+          type: integer
+          format: int64
+          description: Board-wide strictly increasing sequence number.
+        server_ts:
+          type: integer
+          format: int64
+          description: Server time in Unix milliseconds.
+    Event:
+      description: Event envelope. The `type` field selects the payload schema.
+      oneOf:
+        - $ref: "#/components/schemas/CardCreatedEvent"
+        - $ref: "#/components/schemas/CardEditedEvent"
+        - $ref: "#/components/schemas/CardMovedEvent"
+        - $ref: "#/components/schemas/CardArchivedEvent"
+        - $ref: "#/components/schemas/ColumnCreatedEvent"
+        - $ref: "#/components/schemas/ColumnRenamedEvent"
+        - $ref: "#/components/schemas/ColumnMovedEvent"
+        - $ref: "#/components/schemas/ColumnArchivedEvent"
+        - $ref: "#/components/schemas/ColumnRebalancedEvent"
+        - $ref: "#/components/schemas/ColumnsRebalancedEvent"
+        - $ref: "#/components/schemas/BoardRenamedEvent"
+        - $ref: "#/components/schemas/BoardDeletedEvent"
+        - $ref: "#/components/schemas/MemberAddedEvent"
+        - $ref: "#/components/schemas/MemberRoleChangedEvent"
+        - $ref: "#/components/schemas/MemberRemovedEvent"
+      discriminator:
+        propertyName: type
+        mapping:
+          card.created: "#/components/schemas/CardCreatedEvent"
+          card.edited: "#/components/schemas/CardEditedEvent"
+          card.moved: "#/components/schemas/CardMovedEvent"
+          card.archived: "#/components/schemas/CardArchivedEvent"
+          column.created: "#/components/schemas/ColumnCreatedEvent"
+          column.renamed: "#/components/schemas/ColumnRenamedEvent"
+          column.moved: "#/components/schemas/ColumnMovedEvent"
+          column.archived: "#/components/schemas/ColumnArchivedEvent"
+          column.rebalanced: "#/components/schemas/ColumnRebalancedEvent"
+          columns.rebalanced: "#/components/schemas/ColumnsRebalancedEvent"
+          board.renamed: "#/components/schemas/BoardRenamedEvent"
+          board.deleted: "#/components/schemas/BoardDeletedEvent"
+          member.added: "#/components/schemas/MemberAddedEvent"
+          member.role_changed: "#/components/schemas/MemberRoleChangedEvent"
+          member.removed: "#/components/schemas/MemberRemovedEvent"
+    CardCreatedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: card.created
+            payload:
+              $ref: "#/components/schemas/CardCreatedPayload"
+    CardEditedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: card.edited
+            payload:
+              $ref: "#/components/schemas/CardEditedPayload"
+    CardMovedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: card.moved
+            payload:
+              $ref: "#/components/schemas/CardMovedPayload"
+    CardArchivedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: card.archived
+            payload:
+              $ref: "#/components/schemas/CardArchivedPayload"
+    ColumnCreatedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: column.created
+            payload:
+              $ref: "#/components/schemas/ColumnCreatedPayload"
+    ColumnRenamedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: column.renamed
+            payload:
+              $ref: "#/components/schemas/ColumnRenamedPayload"
+    ColumnMovedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: column.moved
+            payload:
+              $ref: "#/components/schemas/ColumnMovedPayload"
+    ColumnArchivedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: column.archived
+            payload:
+              $ref: "#/components/schemas/ColumnArchivedPayload"
+    ColumnRebalancedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: column.rebalanced
+            payload:
+              $ref: "#/components/schemas/ColumnRebalancedPayload"
+    ColumnsRebalancedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: columns.rebalanced
+            payload:
+              $ref: "#/components/schemas/ColumnsRebalancedPayload"
+    BoardRenamedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: board.renamed
+            payload:
+              $ref: "#/components/schemas/BoardRenamedPayload"
+    BoardDeletedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: board.deleted
+            payload:
+              $ref: "#/components/schemas/BoardDeletedPayload"
+    MemberAddedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: member.added
+            payload:
+              $ref: "#/components/schemas/MemberAddedPayload"
+    MemberRoleChangedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: member.role_changed
+            payload:
+              $ref: "#/components/schemas/MemberRoleChangedPayload"
+    MemberRemovedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventBase"
+        - type: object
+          properties:
+            type:
+              const: member.removed
+            payload:
+              $ref: "#/components/schemas/MemberRemovedPayload"
+    CardCreatedPayload:
+      allOf:
+        - $ref: "#/components/schemas/Card"
+        - type: object
+          required: [actor_id]
+          properties:
+            actor_id:
+              type: string
+              format: uuid
+    CardEditedPayload:
+      type: object
+      required: [card_id, version, description_version, actor_id]
+      properties:
+        card_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          description: Present when the title changed.
+        description:
+          type: string
+          description: Present when the description changed.
+        version:
+          type: integer
+          format: int64
+        description_version:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+    CardMovedPayload:
+      type: object
+      required: [card_id, from_column_id, to_column_id, rank, version, actor_id]
+      properties:
+        card_id:
+          type: string
+          format: uuid
+        from_column_id:
+          type: string
+          format: uuid
+        to_column_id:
+          type: string
+          format: uuid
+        rank:
+          type: string
+        version:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+    CardArchivedPayload:
+      type: object
+      required: [card_id, column_id, version, actor_id]
+      properties:
+        card_id:
+          type: string
+          format: uuid
+        column_id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+    ColumnCreatedPayload:
+      allOf:
+        - $ref: "#/components/schemas/Column"
+        - type: object
+          required: [actor_id]
+          properties:
+            actor_id:
+              type: string
+              format: uuid
+    ColumnRenamedPayload:
+      type: object
+      required: [column_id, title, version, actor_id]
+      properties:
+        column_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        version:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+    ColumnMovedPayload:
+      type: object
+      required: [column_id, rank, version, actor_id]
+      properties:
+        column_id:
+          type: string
+          format: uuid
+        rank:
+          type: string
+        version:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+    ColumnArchivedPayload:
+      type: object
+      required: [column_id, card_ids, version, actor_id]
+      properties:
+        column_id:
+          type: string
+          format: uuid
+        card_ids:
+          type: array
+          description: Cards archived together with the column.
+          items:
+            type: string
+            format: uuid
+        version:
+          type: integer
+          format: int64
+        actor_id:
+          type: string
+          format: uuid
+    ColumnRebalancedPayload:
+      type: object
+      required: [column_id, cards, actor_id]
+      properties:
+        column_id:
+          type: string
+          format: uuid
+        cards:
+          type: array
+          items:
+            type: object
+            required: [card_id, rank]
+            properties:
+              card_id:
+                type: string
+                format: uuid
+              rank:
+                type: string
+        actor_id:
+          type: string
+          format: uuid
+    ColumnsRebalancedPayload:
+      type: object
+      required: [columns, actor_id]
+      properties:
+        columns:
+          type: array
+          items:
+            type: object
+            required: [column_id, rank]
+            properties:
+              column_id:
+                type: string
+                format: uuid
+              rank:
+                type: string
+        actor_id:
+          type: string
+          format: uuid
+    BoardRenamedPayload:
+      type: object
+      required: [title, actor_id]
+      properties:
+        title:
+          type: string
+        actor_id:
+          type: string
+          format: uuid
+    BoardDeletedPayload:
+      type: object
+      required: [actor_id]
+      properties:
+        actor_id:
+          type: string
+          format: uuid
+    MemberAddedPayload:
+      type: object
+      required: [user_id, display_name, avatar_color, role, actor_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        avatar_color:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        actor_id:
+          type: string
+          format: uuid
+    MemberRoleChangedPayload:
+      type: object
+      required: [user_id, role, actor_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/Role"
+        actor_id:
+          type: string
+          format: uuid
+    MemberRemovedPayload:
+      type: object
+      required: [user_id, actor_id]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        actor_id:
+          type: string
+          format: uuid
