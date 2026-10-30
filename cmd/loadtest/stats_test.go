@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -83,4 +84,87 @@ func TestOptionsValidation(t *testing.T) {
 		mutate(&o)
 		assert.Error(t, o.validate(), name)
 	}
+}
+
+func ranks(n int) []time.Duration {
+	out := make([]time.Duration, n)
+	for i := range out {
+		out[i] = time.Duration(i + 1)
+	}
+	return out
+}
+
+func TestPercentileMatchesIntegerNearestRankForEverySampleCount(t *testing.T) {
+	for _, pct := range []int{50, 95, 99} {
+		p := float64(pct) / 100
+		for n := 1; n <= 3000; n++ {
+			want := time.Duration((pct*n + 99) / 100)
+			require.Equal(t, want, percentile(ranks(n), p), "p%d of %d samples", pct, n)
+		}
+	}
+}
+
+func TestPercentileBoundaries(t *testing.T) {
+	assert.Zero(t, percentile(nil, 0.95))
+	assert.Equal(t, time.Duration(1), percentile(ranks(10), 0))
+	assert.Equal(t, time.Duration(10), percentile(ranks(10), 1))
+	assert.Equal(t, time.Duration(10), percentile(ranks(10), 7))
+	assert.Equal(t, time.Duration(1), percentile(ranks(10), -1))
+}
+
+func TestSummarizeTwoSamples(t *testing.T) {
+	d := summarize([]time.Duration{20 * time.Millisecond, 10 * time.Millisecond})
+	assert.Equal(t, 2, d.Count)
+	assert.InDelta(t, 10, d.MinMs, 0.001)
+	assert.InDelta(t, 10, d.P50Ms, 0.001)
+	assert.InDelta(t, 20, d.P95Ms, 0.001)
+	assert.InDelta(t, 20, d.P99Ms, 0.001)
+	assert.InDelta(t, 20, d.MaxMs, 0.001)
+	assert.InDelta(t, 15, d.MeanMs, 0.001)
+}
+
+func TestSummarizeKeepsSubMillisecondPrecisionAndDuplicates(t *testing.T) {
+	d := summarize([]time.Duration{1500 * time.Microsecond, 1500 * time.Microsecond, 1500 * time.Microsecond})
+	assert.InDelta(t, 1.5, d.MinMs, 0.0001)
+	assert.InDelta(t, 1.5, d.P99Ms, 0.0001)
+	assert.InDelta(t, 1.5, d.MeanMs, 0.0001)
+}
+
+func TestPercentilesAreMonotonic(t *testing.T) {
+	samples := []time.Duration{9, 1, 7, 3, 5, 3, 8, 2, 2, 100}
+	d := summarize(samples)
+	assert.LessOrEqual(t, d.MinMs, d.P50Ms)
+	assert.LessOrEqual(t, d.P50Ms, d.P95Ms)
+	assert.LessOrEqual(t, d.P95Ms, d.P99Ms)
+	assert.LessOrEqual(t, d.P99Ms, d.MaxMs)
+}
+
+func TestReportWithoutLatencySamplesNeverPassesTheP95Target(t *testing.T) {
+	r := &runner{opts: options{P95Target: time.Second, ResyncTarget: time.Second}, col: newCollector(), report: Report{}}
+	r.finish()
+	assert.False(t, r.report.Targets.P95Pass)
+	assert.True(t, r.report.Targets.ResyncPass)
+	assert.False(t, r.report.Passed())
+}
+
+func TestReportFlagsMissingEventsAndResyncsThatDidNotCatchUp(t *testing.T) {
+	col := newCollector()
+	col.recording.Store(true)
+	id := uuid.New()
+	col.opSent(id, 0, time.Now())
+	col.eventReceived(id, time.Now().Add(time.Millisecond), 0)
+	r := &runner{
+		opts:    options{P95Target: time.Second, ResyncTarget: time.Second},
+		col:     col,
+		clients: make([]*wsClient, 2),
+		report:  Report{Resync: []ResyncTrial{{Victim: 1, TargetSeq: 9, CaughtUp: false, CaughtUpMs: 5000, Handshake: handshakeResult{ReadyMs: 10}}}},
+	}
+	r.finish()
+	assert.Equal(t, 1, r.report.Ops.MissingEvents)
+	assert.False(t, r.report.Targets.ResyncPass)
+	assert.InDelta(t, 5000, r.report.ResyncMaxMs, 0.001)
+	require.Len(t, r.report.Failures, 2)
+	assert.Contains(t, r.report.Failures[0], "did not catch up to seq 9")
+	assert.Contains(t, r.report.Failures[1], "never arrived")
+	assert.False(t, r.report.Passed())
 }
